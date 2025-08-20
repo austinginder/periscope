@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "badcow/dns",
-            "version": "v4.2.1",
+            "version": "v4.3.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/Badcow/DNS.git",
-                "reference": "75a7f0ebb9a22401a88df9c80863a12191841cae"
+                "reference": "5e3da4137dcf4c77f60683011cb4123b328fbfda"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Badcow/DNS/zipball/75a7f0ebb9a22401a88df9c80863a12191841cae",
-                "reference": "75a7f0ebb9a22401a88df9c80863a12191841cae",
+                "url": "https://api.github.com/repos/Badcow/DNS/zipball/5e3da4137dcf4c77f60683011cb4123b328fbfda",
+                "reference": "5e3da4137dcf4c77f60683011cb4123b328fbfda",
                 "shasum": ""
             },
             "require": {
@@ -49,9 +49,9 @@
             "description": "A PHP library for creating DNS zone files based on RFC1035",
             "support": {
                 "issues": "https://github.com/Badcow/DNS/issues",
-                "source": "https://github.com/Badcow/DNS/tree/v4.2.1"
+                "source": "https://github.com/Badcow/DNS/tree/v4.3.0"
             },
-            "time": "2022-11-12T01:08:46+00:00"
+            "time": "2024-08-06T13:50:25+00:00"
         },
         {
             "name": "christian-riesen/base32",
@@ -160,10 +160,10 @@
     "packages-dev": [],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": [],
+    "stability-flags": {},
     "prefer-stable": false,
     "prefer-lowest": false,
-    "platform": [],
-    "platform-dev": [],
+    "platform": {},
+    "platform-dev": {},
     "plugin-api-version": "2.6.0"
 }
