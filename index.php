@@ -28,6 +28,32 @@ function specialTxtFormatter(Badcow\DNS\Rdata\TXT $rdata, int $padding): string 
 
 function run() {
 
+    // Handle context menu lookups
+    if ( isset( $_REQUEST['dig'] ) ) {
+        header('Content-Type: text/plain');
+        $domain_to_dig = trim( $_REQUEST['dig'], ".'\"" ); // Sanitize a bit
+        if (filter_var($domain_to_dig, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+            $escaped_domain = escapeshellarg($domain_to_dig);
+            echo shell_exec("dig $escaped_domain +short");
+        } else {
+            echo "Invalid domain provided.";
+        }
+        die();
+    }
+
+    if ( isset( $_REQUEST['whois'] ) ) {
+        header('Content-Type: text/plain');
+        $ip_to_check = trim( $_REQUEST['whois'] );
+        if (filter_var($ip_to_check, FILTER_VALIDATE_IP)) {
+            $escaped_ip = escapeshellarg($ip_to_check);
+            echo shell_exec("whois $escaped_ip");
+        } else {
+            echo "Invalid IP address provided.";
+        }
+        die();
+    }
+
+
     if ( ! isset( $_REQUEST['domain'] ) ) {
         return;
     }
@@ -338,12 +364,12 @@ run();
 ?><!DOCTYPE html>
 <html>
 <head>
-    <title>WHOIS</title>
+    <title>Periscope</title>
     <link href="prism.css" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/vuetify@v3.7.6/dist/vuetify.min.css" rel="stylesheet">
-    <link rel="icon" href="favicon.png" />
+    <link rel="icon" href="Periscope.webp" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, minimal-ui">
     <style>
     [v-cloak] > * {
@@ -352,18 +378,67 @@ run();
     .multiline {
         white-space: pre-wrap;
     }
-    .theme--light.v-application code {
-        padding: 0px;
-        background: transparent;
+    /* Base Toolbar (light mode default) */
+    .top-toolbar {
+        background: linear-gradient(to bottom right, #fff, #fff);
+        border-radius: 2rem;
+        padding: 0.75rem 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 1rem auto;
+        max-width: 90%;
+        position: relative;
+        z-index: 1000;
+        border: 1px solid #08263d;
+    }
+
+    .top-toolbar a {
+        color: #004d73;
+        text-decoration: none;
+        margin: 0 0.75rem;
+        font-weight: 600;
+        transition: color 0.2s;
+    }
+
+    .top-toolbar a:hover {
+        color: #0077be;
+    }
+
+    /* 🌙 Dark Mode Styles */
+    .v-theme--dark .top-toolbar {
+        background: linear-gradient(to bottom right, #000, #000);
+        border: 1px solid #f6ecdb;
+    }
+
+    .v-theme--dark .top-toolbar a {
+        color: #b3e5fc; /* Lighter, soft blue text */
+    }
+
+    .v-theme--dark .top-toolbar a:hover {
+        color: #ffffff;
+    }
+
+    /* --- Prism JS Theme Overrides for DNS Zone --- */
+    pre[class*=language-] {
+        margin: 0 !important;
     }
     </style>
 </head>
 <body>
   <div id="app" v-cloak>
-    <v-app>
+    <v-app :theme="currentTheme">
       <v-main>
-        <v-container>
-            <v-text-field variant="outlined" color="primary" label="Domain" v-model="domain" spellcheck="false" @keydown.enter="lookupDomain()" class="mt-5 mx-auto">
+        <v-toolbar flat dense color="transparent" class="top-toolbar py-0 px-3">
+            <v-img src="Periscope.webp" max-height="50" max-width="50" contain class="ml-2"></v-img>
+            <v-toolbar-title>Periscope</v-toolbar-title>
+            <v-spacer></v-spacer>
+            <v-btn icon @click="toggleTheme()">
+                <v-icon>{{ currentTheme === 'dark' ? 'mdi-white-balance-sunny' : 'mdi-moon-waning-crescent' }}</v-icon>
+            </v-btn>
+        </v-toolbar>
+        <v-container class="mb-16 pb-16">
+            <v-text-field autofocus variant="outlined" color="primary" label="Domain" v-model="domain" spellcheck="false" @keydown.enter="lookupDomain()" class="mt-5 mx-auto">
             <template v-slot:append-inner>
                 <v-btn variant="flat" color="primary" @click="lookupDomain()" :loading="loading">
                     Lookup
@@ -371,41 +446,12 @@ run();
                 </v-btn>
             </template>
             </v-text-field>
-            
             <v-alert type="warning" v-for="error in response.errors" class="mb-3" v-html="error"></v-alert>
             <v-row v-if="response.whois && response.whois != ''">
             <v-col md="5" cols="12">
-            <v-card variant="outlined" color="primary">
-                <v-card-title>Whois</v-card-title>
-                <v-card-text>
-                <v-table density="compact">
-                <template v-slot:default>
-                <thead>
-                    <tr>
-                    <th class="text-left">
-                        Name
-                    </th>
-                    <th class="text-left">
-                        Value
-                    </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for='record in response.whois'>
-                        <td>{{ record.name }}</td>
-                        <td>{{ record.value }}</td>
-                    </tr>
-                </tbody>
-                </template>
-                </v-table>
-                </v-card-text>
-                </v-card>
-            </v-card>
-            <v-card class="mt-5" variant="outlined" color="primary">
-                <v-card-title>IP information</v-card-title>
-                <v-card-text>
-                    <template v-for='(rows, ip) in response.ip_lookup'>
-                    <div class="mt-3">Details for {{ ip }}</div>
+                <v-card variant="outlined" color="primary">
+                    <v-card-title>Whois</v-card-title>
+                    <v-card-text>
                     <v-table density="compact">
                     <template v-slot:default>
                     <thead>
@@ -419,86 +465,111 @@ run();
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for='row in rows.split("\n")'>
-                            <td>{{ row.split( ":" )[0] }}</td>
-                            <td>{{ row.split( ":" )[1] }}</td>
+                        <tr v-for='record in response.whois'>
+                            <td>{{ record.name }}</td>
+                            <td @contextmenu="showContextMenu($event, record.value)">{{ record.value }}</td>
                         </tr>
                     </tbody>
                     </template>
                     </v-table>
-                    </template>
-                </v-card-text>
+                    </v-card-text>
                 </v-card>
-            </v-card>
-            <v-card class="mt-5" variant="outlined" color="primary">
-                <v-card-title>HTTP headers</v-card-title>
-                <v-card-text>
-                    <v-table density="compact">
-                    <template v-slot:default>
-                    <thead>
-                        <tr>
-                        <th class="text-left" style="min-width: 200px;">
-                            Name
-                        </th>
-                        <th class="text-left">
-                            Value
-                        </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for='(key, value) in response.http_headers'>
-                            <td>{{ value }}</td>
-                            <td>{{ key }}</td>
-                        </tr>
-                    </tbody>
-                    </template>
-                    </v-table>
-                </v-card-text>
+                <v-card class="mt-5" variant="outlined" color="primary">
+                    <v-card-title>IP information</v-card-title>
+                    <v-card-text>
+                        <template v-for='(rows, ip) in response.ip_lookup'>
+                        <div class="mt-3">Details for {{ ip }}</div>
+                        <v-table density="compact">
+                        <template v-slot:default>
+                        <thead>
+                            <tr>
+                            <th class="text-left">
+                                Name
+                            </th>
+                            <th class="text-left">
+                                Value
+                            </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for='row in rows.split("\n")'>
+                                <td>{{ row.split( ":" )[0] }}</td>
+                                <td @contextmenu="showContextMenu($event, row.split( ':' )[1])">{{ row.split( ":" )[1] }}</td>
+                            </tr>
+                        </tbody>
+                        </template>
+                        </v-table>
+                        </template>
+                    </v-card-text>
                 </v-card>
-            </v-card>
+                <v-card class="mt-5" variant="outlined" color="primary">
+                    <v-card-title>HTTP headers</v-card-title>
+                    <v-card-text>
+                        <v-table density="compact">
+                        <template v-slot:default>
+                        <thead>
+                            <tr>
+                            <th class="text-left" style="min-width: 200px;">
+                                Name
+                            </th>
+                            <th class="text-left">
+                                Value
+                            </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for='(key, value) in response.http_headers'>
+                                <td>{{ value }}</td>
+                                <td @contextmenu="showContextMenu($event, key)">{{ key }}</td>
+                            </tr>
+                        </tbody>
+                        </template>
+                        </v-table>
+                    </v-card-text>
+                    </v-card>
             </v-col>
+            
             <v-col md="7" cols="12">
-            <v-card variant="outlined" color="primary">
-                <v-card-title>Common DNS records</v-card-title>
-                <v-card-text>
-                <v-table density="compact">
-                <template v-slot:default>
-                <thead>
-                    <tr>
-                    <th class="text-left">
-                        Type
-                    </th>
-                    <th class="text-left">
-                        Name
-                    </th>
-                    <th class="text-left">
-                        Value
-                    </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="record in response.dns_records">
-                        <td>{{ record.type }}</td>
-                        <td>{{ record.name }}</td>
-                        <td class="multiline">{{ record.value }}</td>
-                    </tr>
-                </tbody>
-                </template>
-                </v-table>
-                </v-card-text>
+                <v-card variant="outlined" color="primary">
+                    <v-card-title>Common DNS records</v-card-title>
+                    <v-card-text>
+                    <v-table density="compact">
+                    <template v-slot:default>
+                    <thead>
+                        <tr>
+                        <th class="text-left">
+                            Type
+                        </th>
+                        <th class="text-left">
+                            Name
+                        </th>
+                        <th class="text-left">
+                            Value
+                        </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="record in response.dns_records">
+                            <td>{{ record.type }}</td>
+                            <td>{{ record.name }}</td>
+                            <td class="multiline" @contextmenu="showContextMenu($event, record.value)">{{ record.value }}</td>
+                        </tr>
+                    </tbody>
+                    </template>
+                    </v-table>
+                    </v-card-text>
                 </v-card>
-            </v-card>
-            <v-card class="mt-5" variant="flat">
-                <v-btn size="small" @click="copyZone()" class="position-absolute right-0 mt-6" style="margin-right: 140px;">
-                  <v-icon left>mdi-content-copy</v-icon>
-                </v-btn>
-                <v-btn size="small" @click="downloadZone()" class="position-absolute right-0 mt-6 mr-4">
-                  <v-icon left>mdi-download</v-icon>
-                  Download
-                </v-btn>
-                <pre class="language-dns-zone-file text-body-2" style="border-radius:4px;border:0px"><code class="language-dns-zone-file">{{ response.zone }}</code></pre>
-                <a ref="download_zone" href="#"></a>
-            </v-card>
+                <v-card class="mt-5" variant="flat">
+                    <v-btn size="small" @click="copyZone()" class="position-absolute right-0 mt-6" style="margin-right: 140px;">
+                      <v-icon left>mdi-content-copy</v-icon>
+                    </v-btn>
+                    <v-btn size="small" @click="downloadZone()" class="position-absolute right-0 mt-6 mr-4">
+                      <v-icon left>mdi-download</v-icon>
+                      Download
+                    </v-btn>
+                    <pre class="language-dns-zone-file text-body-2" style="border-radius:4px;border:0px"><code class="language-dns-zone-file">{{ response.zone }}</code></pre>
+                    <a ref="download_zone" href="#"></a>
+                </v-card>
             </v-col>
             </v-row>
         </v-container>
@@ -510,6 +581,30 @@ run();
             </v-btn>
         </template>
         </v-snackbar>
+        
+        <v-menu v-model="contextMenu.show" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px', position: 'fixed', zIndex: 9999 }">
+            <v-list dense>
+                <v-list-item v-if="isDomain(contextMenu.value)" @click="runDig(contextMenu.value)">
+                    <v-list-item-title>Dig {{ contextMenu.value }}</v-list-item-title>
+                </v-list-item>
+                <v-list-item v-if="isIp(contextMenu.value)" @click="runWhois(contextMenu.value)">
+                    <v-list-item-title>Whois {{ contextMenu.value }}</v-list-item-title>
+                </v-list-item>
+            </v-list>
+        </v-menu>
+
+        <v-dialog v-model="dialog.show" max-width="800">
+            <v-card>
+                <v-card-title>{{ dialog.title }}</v-card-title>
+                <v-card-text>
+                    <pre>{{ dialog.content }}</pre>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn color="primary" text @click="dialog.show = false">Close</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
       </v-main>
     </v-app>
   </div>
@@ -519,7 +614,32 @@ run();
   <script>
     const { createApp } = Vue;
     const { createVuetify } = Vuetify;
-    const vuetify = createVuetify();
+    const vuetify = createVuetify({
+        theme: {
+            themes: {
+                light: {
+                    dark: false,
+                    colors: {
+                        background: '#F8F9F9', // Sail White
+                        primary: '#09263f',    // New Primary Color
+                        secondary: '#001F3F', // Deep Navy
+                        error: '#FF4136',      // Signal Red
+                        info: '#F5DEB3'        // Rope Beige
+                    }
+                },
+                dark: {
+                    dark: true,
+                    colors: {
+                        background: '#000000ff', // Deep Navy
+                        primary: '#f6ecdb',    // New Primary Color
+                        secondary: '#F5DEB3', // Rope Beige
+                        error: '#FF4136',      // Signal Red
+                        info: '#F8F9F9'        // Sail White
+                    }
+                }
+            }
+        }
+    });
 
     createApp({
         data() {
@@ -527,7 +647,10 @@ run();
                 domain: "",
                 loading: false,
                 snackbar: { show: false, message: "" },
-                response: { whois: "", errors: [], zone: "" }
+                response: { whois: "", errors: [], zone: "" },
+                currentTheme: localStorage.getItem('theme') || 'light',
+                contextMenu: { show: false, x: 0, y: 0, value: '' },
+                dialog: { show: false, title: '', content: '' }
             }
         },
         methods: {
@@ -546,19 +669,13 @@ run();
             },
             extractHostname( url ) {
                 var hostname;
-                //find & remove protocol (http, ftp, etc.) and get hostname
-
                 if (url.indexOf("//") > -1) {
                     hostname = url.split('/')[2];
                 } else {
                     hostname = url.split('/')[0];
                 }
-
-                //find & remove port number
                 hostname = hostname.split(':')[0];
-                //find & remove "?"
                 hostname = hostname.split('?')[0];
-
                 return hostname;
             },
             downloadZone() {
@@ -571,7 +688,62 @@ run();
                 navigator.clipboard.writeText( this.response.zone )
                 this.snackbar.message = "Zone copied to clipboard"
                 this.snackbar.show = true
+            },
+            toggleTheme() {
+                this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
+                localStorage.setItem('theme', this.currentTheme);
+            },
+            isDomain(str) {
+                if (typeof str !== 'string' || str.trim() === '') return false;
+                // A simple check: contains a dot, no spaces, and is not an IP address. Allows for an optional trailing dot.
+                const cleanedStr = str.trim().split('\n')[0].trim(); // Check the first line
+                const domainRegex = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\.?$/;
+                return domainRegex.test(cleanedStr) && !this.isIp(cleanedStr);
+            },
+            isIp(str) {
+                if (typeof str !== 'string' || str.trim() === '') return false;
+                const cleanedStr = str.trim().split('\n')[0].trim(); // Check the first line
+                const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+                return ipRegex.test(cleanedStr);
+            },
+            showContextMenu(event, value) {
+                const cleanedValue = typeof value === 'string' ? value.trim() : '';
+                if (!this.isDomain(cleanedValue) && !this.isIp(cleanedValue)) {
+                    return; // Don't show menu if not a valid domain or IP
+                }
+                event.preventDefault();
+                this.contextMenu.show = false;
+                this.contextMenu.x = event.clientX;
+                this.contextMenu.y = event.clientY;
+                this.contextMenu.value = cleanedValue.split('\n')[0].trim(); // Use the first line for the action
+                this.$nextTick(() => {
+                    this.contextMenu.show = true;
+                });
+            },
+            runDig(domain) {
+                this.dialog.title = `dig ${domain} +short`;
+                this.dialog.content = 'Loading...';
+                this.dialog.show = true;
+                fetch(`?dig=${encodeURIComponent(domain)}`)
+                    .then(response => response.text())
+                    .then(data => {
+                        this.dialog.content = data.trim() === '' ? 'No results found.' : data;
+                    });
+            },
+            runWhois(ip) {
+                this.dialog.title = `whois ${ip}`;
+                this.dialog.content = 'Loading...';
+                this.dialog.show = true;
+                fetch(`?whois=${encodeURIComponent(ip)}`)
+                    .then(response => response.text())
+                    .then(data => {
+                        this.dialog.content = data.trim() === '' ? 'No results found.' : data;
+                    });
             }
+        },
+        mounted() {
+            // Apply saved theme on page load
+            document.documentElement.setAttribute('data-theme', this.currentTheme);
         }
     }).use(vuetify).mount('#app');
   </script>
