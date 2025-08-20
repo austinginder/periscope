@@ -19,10 +19,7 @@ You can run this on a local machine or any web server that supports PHP and `she
 git clone https://github.com/austinginder/periscope.git
 
 # Navigate into the directory
-cd whois
-
-# Install dependencies
-composer install
+cd periscope
 
 # Start the local PHP server
 php -S localhost:8000
