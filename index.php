@@ -123,8 +123,18 @@ EOT;
         [ "a"     => "mail" ],
         [ "a"     => "remote" ],
         [ "a"     => "www" ],
+        [ "a"     => "blog" ],
+        [ "a"     => "shop" ],
+        [ "a"     => "portal" ],
+        [ "a"     => "api" ],
+        [ "a"     => "dev" ],
         [ "cname" => "*" ],
         [ "cname" => "www" ],
+        [ "cname" => "blog" ],
+        [ "cname" => "shop" ],
+        [ "cname" => "portal" ],
+        [ "cname" => "api" ],
+        [ "cname" => "dev" ],
         [ "cname" => "autodiscover" ],
         [ "cname" => "sip" ],
         [ "cname" => "lyncdiscover" ],
@@ -157,8 +167,12 @@ EOT;
         [ "txt"   => "mg" ],
         [ "txt"   => "smtp._domainkey.mg" ],
         [ "txt"   => "k1._domainkey" ],
+        [ "txt"   => "default._bimi" ],
         [ "srv"   => "_sip._tls" ],
         [ "srv"   => "_sipfederationtls._tcp" ],
+        [ "srv"   => "_autodiscover._tcp" ],
+        [ "srv"   => "_submissions._tcp" ],
+        [ "srv"   => "_imaps._tcp" ],
         [ "ns"    => "" ],
         [ "soa"   => "" ],
     ];
@@ -315,7 +329,7 @@ EOT;
     "ip_lookup"    => $ip_lookup,
     "errors"       => [],
     "zone"         => $builder->build($zone)
-  ]);
+  ] );
   die();
 }
 
