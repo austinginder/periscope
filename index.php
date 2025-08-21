@@ -552,7 +552,16 @@ run();
                         <tr v-for="record in response.dns_records">
                             <td>{{ record.type }}</td>
                             <td>{{ record.name }}</td>
-                            <td class="multiline" @contextmenu="showContextMenu($event, record.value)">{{ record.value }}</td>
+                            <td class="multiline">
+                                <template v-if="record.type !== 'mx'">
+                                    <span @contextmenu="showContextMenu($event, record.value)">{{ record.value }}</span>
+                                </template>
+                                <template v-else>
+                                    <div v-for="line in record.value.split('\n').filter(l => l.trim() !== '')" :key="line">
+                                        {{ line.split(' ')[0] }}&nbsp;<span @contextmenu="showContextMenu($event, line.split(' ')[1])" style="cursor: pointer;">{{ line.split(' ')[1] }}</span>
+                                    </div>
+                                </template>
+                            </td>
                         </tr>
                     </tbody>
                     </template>
