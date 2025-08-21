@@ -442,7 +442,7 @@ run();
             <template v-slot:append-inner>
                 <v-btn variant="flat" color="primary" @click="lookupDomain()" :loading="loading">
                     Lookup
-                    <template v-slot:loader><v-progress-circular :size="22" :width="2" color="white" indeterminate></v-progress-circular></template>
+                    <template v-slot:loader><v-progress-circular :size="22" :width="2" :color="currentTheme === 'dark' ? 'black' : 'white'" indeterminate></v-progress-circular></template>
                 </v-btn>
             </template>
             </v-text-field>
