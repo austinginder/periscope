@@ -34,7 +34,16 @@ function run() {
         $domain_to_dig = trim( $_REQUEST['dig'], ".'\"" ); // Sanitize a bit
         if (filter_var($domain_to_dig, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
             $escaped_domain = escapeshellarg($domain_to_dig);
-            echo shell_exec("dig $escaped_domain +short");
+            
+            // Try the default (A record) lookup first
+            $result = shell_exec("dig $escaped_domain +short");
+
+            // If that's empty, fall back to a TXT lookup
+            if (empty(trim($result))) {
+                $result = shell_exec("dig $escaped_domain TXT +short");
+            }
+            
+            echo $result;
         } else {
             echo "Invalid domain provided.";
         }
@@ -53,6 +62,17 @@ function run() {
         die();
     }
 
+    if ( isset( $_REQUEST['raw_whois'] ) ) {
+        header('Content-Type: text/plain');
+        $domain_to_check = trim( $_REQUEST['raw_whois'] );
+        if (filter_var($domain_to_check, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+            $escaped_domain = escapeshellarg($domain_to_check);
+            echo shell_exec("whois $escaped_domain");
+        } else {
+            echo "Invalid domain provided.";
+        }
+        die();
+    }
 
     if ( ! isset( $_REQUEST['domain'] ) ) {
         return;
@@ -450,6 +470,9 @@ run();
             <v-row v-if="response.whois && response.whois != ''">
             <v-col md="5" cols="12">
                 <v-card variant="outlined" color="primary">
+                    <v-btn size="small" @click="showRawWhois()" class="position-absolute right-0 mt-2 mr-4" variant="tonal">
+                        View raw
+                    </v-btn>
                     <v-card-title>Whois</v-card-title>
                     <v-card-text>
                     <v-table density="compact">
@@ -478,7 +501,12 @@ run();
                     <v-card-title>IP information</v-card-title>
                     <v-card-text>
                         <template v-for='(rows, ip) in response.ip_lookup'>
-                        <div class="mt-3">Details for {{ ip }}</div>
+                        <div class="d-flex justify-space-between align-center mt-3 mb-2">
+                            <span>Details for {{ ip }}</span>
+                            <v-btn size="small" @click="runWhois(ip)" variant="tonal">
+                                View raw
+                            </v-btn>
+                        </div>
                         <v-table density="compact">
                         <template v-slot:default>
                         <thead>
@@ -730,7 +758,7 @@ run();
                 });
             },
             runDig(domain) {
-                this.dialog.title = `dig ${domain} +short`;
+                this.dialog.title = `Dig results for: ${domain}`;
                 this.dialog.content = 'Loading...';
                 this.dialog.show = true;
                 fetch(`?dig=${encodeURIComponent(domain)}`)
@@ -744,6 +772,16 @@ run();
                 this.dialog.content = 'Loading...';
                 this.dialog.show = true;
                 fetch(`?whois=${encodeURIComponent(ip)}`)
+                    .then(response => response.text())
+                    .then(data => {
+                        this.dialog.content = data.trim() === '' ? 'No results found.' : data;
+                    });
+            },
+            showRawWhois() {
+                this.dialog.title = `Raw Whois for: ${this.domain}`;
+                this.dialog.content = 'Loading...';
+                this.dialog.show = true;
+                fetch(`?raw_whois=${encodeURIComponent(this.domain)}`)
                     .then(response => response.text())
                     .then(data => {
                         this.dialog.content = data.trim() === '' ? 'No results found.' : data;
