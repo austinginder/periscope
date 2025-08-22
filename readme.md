@@ -25,6 +25,18 @@ cd periscope
 php -S localhost:8000
 ```
 
-Then open `http://localhost:8000` in your browser.
+Then open http://localhost:8000 in your browser
+
+### 🏝️ Using [Cove](https://cove.run) to run Periscope
+
+You will need to have Cove installed and running: https://cove.run. Periscope is a simple PHP app so it can be added to Cove by running the following commands:
+
+```bash
+cove add periscope --plain
+cd $(cove path periscope)
+git clone https://github.com/austinginder/periscope.git .
+```
+
+Then open https://periscope.localhost in your browser.
 
 ![](screenshot.webp)
