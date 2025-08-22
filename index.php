@@ -10,6 +10,124 @@ use Badcow\DNS\AlignedBuilder;
 
 error_reporting(E_ALL & ~E_DEPRECATED);
 
+/**
+ * Establishes a connection to the SQLite database and returns the PDO object.
+ * Creates the database and table if they don't exist.
+ *
+ * @return PDO
+ */
+function getDbConnection(): PDO
+{
+    try {
+        $db = new PDO('sqlite:history.db');
+        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        // Create table if it doesn't exist. NOTE: UNIQUE constraint on 'domain' is removed.
+        $db->exec("CREATE TABLE IF NOT EXISTS history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            domain TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            data TEXT NOT NULL
+        )");
+        return $db;
+    } catch (PDOException $e) {
+        header('Content-Type: application/json');
+        echo json_encode(['error' => 'Database connection failed: ' . $e->getMessage()]);
+        die();
+    }
+}
+
+// Handle AJAX requests for history management
+if (isset($_REQUEST['action'])) {
+    $action = $_REQUEST['action'];
+    $db = getDbConnection();
+
+    switch ($action) {
+        case 'get_history':
+            header('Content-Type: application/json');
+            // Select all historical entries, not just the most recent per domain.
+            $stmt = $db->query("SELECT id, domain, timestamp FROM history ORDER BY timestamp DESC");
+            $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            echo json_encode($history);
+            break;
+
+        case 'get_domain_versions':
+            header('Content-Type: application/json');
+            $domain = $_GET['domain'] ?? '';
+            $stmt = $db->prepare("SELECT id, domain, timestamp FROM history WHERE domain = ? ORDER BY timestamp DESC");
+            $stmt->execute([$domain]);
+            $versions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            echo json_encode($versions);
+            break;
+
+        case 'get_history_item':
+            header('Content-Type: application/json');
+            $id = $_GET['id'] ?? 0;
+            $stmt = $db->prepare("SELECT data, timestamp FROM history WHERE id = ?");
+            $stmt->execute([$id]);
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($result) {
+                // Return data and timestamp
+                $data = json_decode($result['data'], true);
+                $data['timestamp'] = $result['timestamp'];
+                echo json_encode($data);
+            } else {
+                echo json_encode(['error' => 'History item not found.']);
+            }
+            break;
+
+        case 'delete_history':
+            header('Content-Type: application/json');
+            $id = $_POST['id'] ?? 0;
+            $stmt = $db->prepare("DELETE FROM history WHERE id = ?");
+            echo json_encode(['success' => $stmt->execute([$id])]);
+            break;
+
+        case 'export_history':
+            $stmt = $db->query("SELECT domain, timestamp, data FROM history ORDER BY timestamp DESC");
+            $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            header('Content-Type: application/json');
+            header('Content-Disposition: attachment; filename="periscope-history-' . date('Y-m-d') . '.json"');
+            echo json_encode($history, JSON_PRETTY_PRINT);
+            break;
+
+        case 'import_history':
+            header('Content-Type: application/json');
+            if (isset($_FILES['importFile']) && $_FILES['importFile']['error'] === UPLOAD_ERR_OK) {
+                $fileContent = file_get_contents($_FILES['importFile']['tmp_name']);
+                $importedHistory = json_decode($fileContent, true);
+
+                if (is_array($importedHistory)) {
+                    $db->beginTransaction();
+                    try {
+                        // Use simple INSERT instead of INSERT OR REPLACE
+                        $stmt = $db->prepare("INSERT INTO history (domain, timestamp, data) VALUES (:domain, :timestamp, :data)");
+                        foreach ($importedHistory as $item) {
+                            if (isset($item['domain'], $item['timestamp'], $item['data'])) {
+                                $stmt->execute([
+                                    ':domain' => $item['domain'],
+                                    ':timestamp' => $item['timestamp'],
+                                    ':data' => is_string($item['data']) ? $item['data'] : json_encode($item['data'])
+                                ]);
+                            }
+                        }
+                        $db->commit();
+                        echo json_encode(['success' => true, 'count' => count($importedHistory)]);
+                    } catch (Exception $e) {
+                        $db->rollBack();
+                        echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+                    }
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'Invalid JSON file.']);
+                }
+            } else {
+                echo json_encode(['success' => false, 'message' => 'File upload error.']);
+            }
+            break;
+    }
+    die();
+}
+
+
 function specialTxtFormatter(Badcow\DNS\Rdata\TXT $rdata, int $padding): string
 {
     //If the text length is less than or equal to 50 characters, just return it unaltered.
@@ -144,7 +262,7 @@ EOT;
     foreach ($whois as $key => $record) {
         $split = explode(":", trim($record));
         $name = trim($split[0]);
-        $value = trim($split[1]);
+        $value = trim($split[1] ?? '');
         if ($name == "Name Server" || $name == "Domain Name") {
             $value = strtolower($value);
         }
@@ -270,13 +388,13 @@ EOT;
             }
         }
         if ($type == "a") {
+            $record_values = explode("\n", $value);
             if (!empty($wildcard_a) && $wildcard_a == $record_values) {
                 continue;
             }
             if ($name == "*") {
                 $wildcard_a = $record_values;
             }
-            $record_values = explode("\n", $value);
             $setName = empty($name) ? "@" : $name;
             foreach ($record_values as $record_value) {
                 $record = new ResourceRecord;
@@ -371,14 +489,26 @@ EOT;
     $builder = new AlignedBuilder();
     $builder->addRdataFormatter('TXT', 'specialTxtFormatter');
 
-    echo json_encode([
+    $final_response = [
         "whois" => $whois,
         "http_headers" => $http_headers,
         "dns_records" => $dns_records,
         "ip_lookup" => $ip_lookup,
         "errors" => [],
         "zone" => $builder->build($zone)
-    ]);
+    ];
+
+    // Save result to the database
+    $db = getDbConnection();
+    // Use simple INSERT to allow multiple versions of the same domain
+    $stmt = $db->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, ?)");
+    $timestamp = time();
+    $stmt->execute([$domain, $timestamp, json_encode($final_response)]);
+    
+    // Add timestamp to the response for the frontend
+    $final_response['timestamp'] = $timestamp;
+
+    echo json_encode($final_response);
     die();
 }
 
@@ -480,6 +610,12 @@ run();
                     <v-alert type="warning" v-for="error in response.errors" class="mb-3" v-html="error"></v-alert>
 
                     <v-row v-if="response.whois && response.whois != ''">
+                        <v-col cols="12">
+                            <v-btn v-if="otherVersions.length > 0" @click="showVersionsModal = true" color="primary" variant="tonal" class="mb-4">
+                                <v-icon start>mdi-history</v-icon>
+                                View History ({{ otherVersions.length }} older)
+                            </v-btn>
+                        </v-col>
                         <v-col md="5" cols="12">
                             <v-card variant="outlined" color="primary">
                                 <v-btn size="small" @click="showRawWhois()" class="position-absolute right-0 mt-2 mr-4" variant="tonal">
@@ -640,7 +776,7 @@ run();
                 <v-dialog v-model="showHistoryModal" max-width="600">
                     <v-card>
                         <v-card-title class="d-flex align-center">
-                            <span class="text-h5">Previous Lookups</span>
+                            <span class="text-h5">Recent Lookups</span>
                             <v-spacer></v-spacer>
                             <v-tooltip location="bottom" text="Export history to a JSON file">
                                 <template v-slot:activator="{ props }">
@@ -652,25 +788,14 @@ run();
                                     <v-btn v-bind="props" icon="mdi-import" variant="text" @click="triggerImport"></v-btn>
                                 </template>
                             </v-tooltip>
-                            <v-tooltip location="bottom" text="Clear all history">
-                                <template v-slot:activator="{ props }">
-                                    <v-btn v-bind="props" icon="mdi-delete" variant="text" @click="clearHistory" :disabled="historyItems.length === 0"></v-btn>
-                                </template>
-                            </v-tooltip>
                             <v-btn icon="mdi-close" variant="text" @click="showHistoryModal = false"></v-btn>
                         </v-card-title>
                         <v-card-text>
-                            <v-alert type="warning" variant="tonal" density="compact" class="mb-4" text="Please note: Only the last 100 lookups are saved."></v-alert>
                             <input type="file" ref="importFile" @change="importHistory" accept=".json" style="display:none" />
                             <v-list v-if="historyItems.length > 0">
-                                <v-list-item v-for="(item, index) in historyItems" :key="index" @click="loadFromHistory(item)">
+                                <v-list-item v-for="(item, index) in historyItems" :key="item.id" @click="loadFromHistory(item)">
                                     <v-list-item-title>{{ item.domain }}</v-list-item-title>
                                     <v-list-item-subtitle>{{ formatDate(item.timestamp) }}</v-list-item-subtitle>
-                                    <template v-slot:append>
-                                        <v-btn icon variant="text" @click.stop="removeHistoryItem(index)">
-                                            <v-icon>mdi-close</v-icon>
-                                        </v-btn>
-                                    </template>
                                 </v-list-item>
                             </v-list>
                             <div v-else class="text-center py-8">
@@ -680,6 +805,32 @@ run();
                         </v-card-text>
                     </v-card>
                 </v-dialog>
+                
+                <v-dialog v-model="showVersionsModal" max-width="600">
+                    <v-card>
+                        <v-card-title class="d-flex align-center">
+                            <span class="text-h5">History for {{ domain }}</span>
+                            <v-spacer></v-spacer>
+                            <v-btn icon="mdi-close" variant="text" @click="showVersionsModal = false"></v-btn>
+                        </v-card-title>
+                        <v-card-text>
+                            <v-list>
+                                <v-list-item v-for="(item, index) in domainVersions" :key="item.id" @click="loadFromHistory(item)" :active="item.timestamp === response.timestamp">
+                                    <v-list-item-title>
+                                        <v-icon v-if="item.timestamp === response.timestamp" class="mr-2">mdi-check-circle</v-icon>
+                                        Lookup from {{ formatDate(item.timestamp) }}
+                                        </v-list-item-title>
+                                    <template v-slot:append>
+                                        <v-btn icon variant="text" @click.stop="removeHistoryItem(item, index)">
+                                            <v-icon>mdi-close</v-icon>
+                                        </v-btn>
+                                    </template>
+                                </v-list-item>
+                            </v-list>
+                        </v-card-text>
+                    </v-card>
+                </v-dialog>
+
             </v-main>
         </v-app>
     </div>
@@ -688,7 +839,8 @@ run();
     <script src="https://cdn.jsdelivr.net/npm/vuetify@v3.9.5/dist/vuetify.min.js"></script>
     <script>
         const {
-            createApp
+            createApp,
+            computed
         } = Vue;
         const {
             createVuetify
@@ -731,7 +883,8 @@ run();
                     response: {
                         whois: "",
                         errors: [],
-                        zone: ""
+                        zone: "",
+                        timestamp: null
                     },
                     currentTheme: localStorage.getItem('theme') || 'light',
                     contextMenu: {
@@ -746,7 +899,15 @@ run();
                         content: ''
                     },
                     showHistoryModal: false,
-                    historyItems: []
+                    historyItems: [],
+                    showVersionsModal: false,
+                    domainVersions: []
+                }
+            },
+            computed: {
+                otherVersions() {
+                    if (!this.response.timestamp) return [];
+                    return this.domainVersions.filter(v => v.timestamp !== this.response.timestamp);
                 }
             },
             methods: {
@@ -758,7 +919,8 @@ run();
                         .then(data => {
                             this.loading = false
                             this.response = data
-                            this.saveToHistory(this.domain, data)
+                            this.loadHistory() // Refresh main history list
+                            this.getDomainVersions(this.domain); // Get all versions for this domain
                         })
                         .then(done => {
                             Prism.highlightAll()
@@ -795,16 +957,13 @@ run();
                 },
                 isDomain(str) {
                     if (typeof str !== 'string' || str.trim() === '') return false;
-                    // A simple check: contains a dot, no spaces, and is not an IP address.
-                    // Allows for an optional trailing dot.
                     const cleanedStr = str.trim().split('\n')[0].trim();
-                    // Check the first line
                     const domainRegex = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\.?$/;
                     return domainRegex.test(cleanedStr) && !this.isIp(cleanedStr);
                 },
                 isIp(str) {
                     if (typeof str !== 'string' || str.trim() === '') return false;
-                    const cleanedStr = str.trim().split('\n')[0].trim(); // Check the first line
+                    const cleanedStr = str.trim().split('\n')[0].trim();
                     const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
                     return ipRegex.test(cleanedStr);
                 },
@@ -813,14 +972,12 @@ run();
                         value.trim() : '';
                     if (!this.isDomain(cleanedValue) && !this.isIp(cleanedValue)) {
                         return;
-                        // Don't show menu if not a valid domain or IP
                     }
                     event.preventDefault();
                     this.contextMenu.show = false;
                     this.contextMenu.x = event.clientX;
                     this.contextMenu.y = event.clientY;
                     this.contextMenu.value = cleanedValue.split('\n')[0].trim();
-                    // Use the first line for the action
                     this.$nextTick(() => {
                         this.contextMenu.show = true;
                     });
@@ -856,78 +1013,61 @@ run();
                         });
                 },
                 // History methods
-                saveToHistory(domain, data) {
-                    // Get existing history or initialize empty array
-                    const history = JSON.parse(localStorage.getItem('periscopeHistory') || '[]');
-                    // Remove any existing entry for this domain to avoid duplicates
-                    const filteredHistory = history.filter(item => item.domain !== domain);
-                    // Add new entry at the beginning
-                    filteredHistory.unshift({
-                        domain: domain,
-                        timestamp: Date.now(),
-                        data: data
-                    });
-
-                    // Limit to 100 entries to prevent localStorage from getting too large
-                    if (filteredHistory.length > 100) {
-                        filteredHistory.pop();
-                    }
-
-                    // Save back to localStorage
-                    localStorage.setItem('periscopeHistory', JSON.stringify(filteredHistory));
-                    // Update the local history items
-                    this.historyItems = filteredHistory;
+                loadHistory() {
+                    fetch("?action=get_history")
+                        .then(response => response.json())
+                        .then(data => {
+                            this.historyItems = data;
+                        });
+                },
+                getDomainVersions(domain) {
+                    fetch(`?action=get_domain_versions&domain=${domain}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            this.domainVersions = data;
+                        });
                 },
                 loadFromHistory(item) {
-                    this.domain = item.domain;
-                    this.response = item.data;
-                    this.showHistoryModal = false;
-                    this.snackbar.message = `Loaded saved results for ${item.domain}`;
-                    this.snackbar.show = true;
-                    // Re-highlight the zone file syntax
-                    this.$nextTick(() => {
-                        Prism.highlightAll();
-                    });
+                    fetch(`?action=get_history_item&id=${item.id}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            this.domain = item.domain;
+                            this.response = data;
+                            this.showHistoryModal = false;
+                            this.showVersionsModal = false;
+                            this.snackbar.message = `Loaded results for ${item.domain} from ${this.formatDate(data.timestamp)}`;
+                            this.snackbar.show = true;
+                            this.getDomainVersions(item.domain); // Refresh the versions list for the new context
+                            this.$nextTick(() => {
+                                Prism.highlightAll();
+                            });
+                        });
                 },
-                removeHistoryItem(index) {
-                    this.historyItems.splice(index, 1);
-                    localStorage.setItem('periscopeHistory', JSON.stringify(this.historyItems));
-                },
-                clearHistory() {
-                    this.historyItems = [];
-                    localStorage.removeItem('periscopeHistory');
-                    this.snackbar.message = "History cleared";
-                    this.snackbar.show = true;
+                removeHistoryItem(item, index) {
+                    const formData = new FormData();
+                    formData.append('id', item.id);
+
+                    fetch('?action=delete_history', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                this.domainVersions.splice(index, 1);
+                                this.loadHistory(); // Reload main history in case the deleted item was the most recent
+                                // If the currently viewed item is the one deleted, clear the view
+                                if (this.response.timestamp === item.timestamp) {
+                                    this.response.whois = ""; // Clear the main view
+                                }
+                            }
+                        });
                 },
                 formatDate(timestamp) {
-                    return new Date(timestamp).toLocaleString();
+                    return new Date(timestamp * 1000).toLocaleString();
                 },
                 exportHistory() {
-                    try {
-                        const historyJson = localStorage.getItem('periscopeHistory');
-                        if (!historyJson || historyJson === '[]') {
-                            this.snackbar.message = "History is empty, nothing to export.";
-                            this.snackbar.show = true;
-                            return;
-                        }
-                        const blob = new Blob([historyJson], {
-                            type: 'application/json'
-                        });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `periscope-history-${new Date().toISOString().slice(0,10)}.json`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                        this.snackbar.message = "History exported successfully.";
-                        this.snackbar.show = true;
-                    } catch (error) {
-                        console.error("Export failed:", error);
-                        this.snackbar.message = "Failed to export history.";
-                        this.snackbar.show = true;
-                    }
+                    window.location.href = '?action=export_history';
                 },
                 triggerImport() {
                     this.$refs.importFile.click();
@@ -936,35 +1076,36 @@ run();
                     const file = event.target.files[0];
                     if (!file) return;
 
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        try {
-                            const importedHistory = JSON.parse(e.target.result);
-                            if (!Array.isArray(importedHistory)) {
-                                throw new Error("Invalid file format.");
+                    const formData = new FormData();
+                    formData.append('importFile', file);
+                    formData.append('action', 'import_history');
+
+                    fetch('', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                this.snackbar.message = `Successfully imported ${data.count} items.`;
+                                this.loadHistory();
+                            } else {
+                                throw new Error(data.message || "Unknown error");
                             }
-                            // Here, we replace the current history with the imported one.
-                            // You could also merge them if preferred.
-                            localStorage.setItem('periscopeHistory', JSON.stringify(importedHistory));
-                            this.historyItems = importedHistory;
-                            this.snackbar.message = `Successfully imported ${importedHistory.length} items.`;
                             this.snackbar.show = true;
-                        } catch (error) {
+                        })
+                        .catch(error => {
                             this.snackbar.message = "Failed to import history: " + error.message;
                             this.snackbar.show = true;
-                        } finally {
-                            // Reset the input value to allow re-importing the same file
+                        })
+                        .finally(() => {
                             event.target.value = '';
-                        }
-                    };
-                    reader.readAsText(file);
+                        });
                 }
             },
             mounted() {
-                // Apply saved theme on page load
                 document.documentElement.setAttribute('data-theme', this.currentTheme);
-                // Load history from localStorage
-                this.historyItems = JSON.parse(localStorage.getItem('periscopeHistory') || '[]');
+                this.loadHistory();
             }
         }).use(vuetify).mount('#app');
     </script>
