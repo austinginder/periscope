@@ -590,7 +590,7 @@ function runCliApp(array $argv, int $argc)
 
     // --- Generate CLI Summary ---
     $registrar = 'N/A';
-    foreach ($final_response['whois'] as $item) {
+    foreach ($final_response['domain'] as $item) {
         if (stripos($item['name'], 'Registrar') !== false) {
             $registrar = $item['value'];
             break;
