@@ -38,6 +38,111 @@ function getDbConnection(): PDO
 }
 
 /**
+ * Performs an RDAP lookup for a domain.
+ *
+ * @param string $domain The domain to look up.
+ * @return array An array of WHOIS data or an empty array on failure.
+ */
+function rdapLookup(string $domain): array
+{
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, "https://rdap.org/domain/" . $domain);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    // Per RFC 7480, RDAP should be served over HTTPS
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+    $json_data = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($http_code !== 200 || !$json_data) {
+        return []; // Return empty array on failure
+    }
+
+    $data = json_decode($json_data, true);
+    $whois = [];
+
+    // Extract key information from the RDAP response
+    if (isset($data['ldhName'])) {
+        $whois[] = ["name" => "Domain Name", "value" => strtolower($data['ldhName'])];
+    }
+
+    if (isset($data['events'])) {
+        foreach ($data['events'] as $event) {
+            if ($event['eventAction'] == 'registration') {
+                $whois[] = ["name" => "Creation Date", "value" => $event['eventDate']];
+            }
+            if ($event['eventAction'] == 'last changed') {
+                $whois[] = ["name" => "Updated Date", "value" => $event['eventDate']];
+            }
+        }
+    }
+
+    if (isset($data['nameservers'])) {
+        foreach ($data['nameservers'] as $ns) {
+            $whois[] = ["name" => "Name Server", "value" => strtolower($ns['ldhName'])];
+        }
+    }
+    
+    if (isset($data['entities'])) {
+        foreach ($data['entities'] as $entity) {
+            if (in_array('registrar', $entity['roles'])) {
+                 $whois[] = ["name" => "Registrar", "value" => $entity['vcardArray'][1][1][3]];
+            }
+        }
+    }
+    
+    if (isset($data['status'])) {
+        foreach ($data['status'] as $status) {
+            $whois[] = ["name" => "Domain Status", "value" => $status];
+        }
+    }
+
+    return $whois;
+}
+
+/**
+ * Parses raw WHOIS text into a structured array.
+ *
+ * @param string $whois_raw The raw text from a WHOIS query.
+ * @return array A structured array of WHOIS data.
+ */
+function parseWhoisText(string $whois_raw): array
+{
+    $whois_lines = explode("\n", trim($whois_raw));
+    $whois = [];
+    $fields_to_capture = [
+        'Name Server',
+        'Registrar:',
+        'Domain Name:',
+        'Updated Date:',
+        'Creation Date:',
+        'Registrar IANA ID:',
+        'Domain Status:',
+        'Reseller:'
+    ];
+
+    foreach ($whois_lines as $record) {
+        foreach ($fields_to_capture as $field) {
+            if (stripos(trim($record), $field) === 0) {
+                $split = explode(":", trim($record), 2);
+                if (count($split) < 2) continue;
+
+                $name = trim(str_replace(':', '', $split[0]));
+                $value = trim($split[1]);
+
+                if ($name == "Name Server" || $name == "Domain Name") {
+                    $value = strtolower($value);
+                }
+                $whois[] = ["name" => $name, "value" => $value];
+            }
+        }
+    }
+    return $whois;
+}
+
+/**
  * Performs the full domain lookup and returns the results as an array.
  *
  * @param string $domain The domain to look up.
@@ -59,11 +164,11 @@ function performDomainLookup(string $domain): array
         }
     }
 
-    if (!filter_var($domain, FILTER_VALIDATE_DOMAIN)) {
+    if (!filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
         $errors[] = "Invalid domain.";
     }
 
-    if (filter_var($domain, FILTER_VALIDATE_DOMAIN) && strpos($domain, '.') === false) {
+    if (strpos($domain, '.') === false) {
         $errors[] = "Invalid domain.";
     }
 
@@ -82,33 +187,37 @@ function performDomainLookup(string $domain): array
     $zone = new Zone($domain . ".");
     $zone->setDefaultTtl(3600);
 
-    $whois_raw = shell_exec("whois $domain | grep -E 'Name Server|Registrar:|Domain Name:|Updated Date:|Creation Date:|Registrar IANA ID:Domain Status:|Reseller:'");
-    if (empty($whois_raw)) {
+    // Attempt RDAP lookup first
+    $whois = rdapLookup($domain);
+
+    // If RDAP fails, fall back to shell whois
+    if (empty($whois)) {
+        $whois_raw = shell_exec("whois " . escapeshellarg($domain));
+        if (empty($whois_raw)) {
+            $errors[] = "Domain not found via RDAP or WHOIS.";
+            return ["errors" => $errors];
+        }
+        $whois = parseWhoisText($whois_raw);
+    }
+    
+    if (empty($whois)) {
         $errors[] = "Domain not found.";
         return ["errors" => $errors];
     }
 
-    $whois_lines = explode("\n", trim($whois_raw));
-    $whois = [];
-    foreach ($whois_lines as $record) {
-        $split = explode(":", trim($record), 2);
-        if (count($split) < 2) continue;
-        $name = trim($split[0]);
-        $value = trim($split[1]);
-        if ($name == "Name Server" || $name == "Domain Name") {
-            $value = strtolower($value);
-        }
-        $whois[] = ["name" => $name, "value" => $value];
-    }
     $whois = array_map("unserialize", array_unique(array_map("serialize", $whois)));
     array_multisort(array_column($whois, 'name'), SORT_ASC, array_column($whois, 'value'), SORT_ASC, $whois);
 
-    $ips = explode("\n", trim(shell_exec("dig $domain +short")));
+    $ips = gethostbynamel($domain);
+    if ($ips === false) {
+        $ips = [];
+    }
+
     foreach ($ips as $ip) {
         if (empty($ip) || !filter_var($ip, FILTER_VALIDATE_IP)) {
             continue;
         }
-        $response = shell_exec("whois $ip | grep -E 'NetName:|Organization:|OrgName:'");
+        $response = shell_exec("whois " . escapeshellarg($ip) . " | grep -E 'NetName:|Organization:|OrgName:'");
         $ip_lookup["$ip"] = empty($response) ? "" : trim($response);
     }
 
@@ -198,8 +307,21 @@ function performDomainLookup(string $domain): array
         $dns_records[] = ["type" => $type, "name" => $name, "value" => $value];
     }
 
-    $response = shell_exec("curl -sLI $domain | awk 'BEGIN{RS=\"\\r\\n\\r\\n\"}; END{print}'");
-    $lines = explode("\n", trim($response));
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $domain);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_HEADER, 1);
+    curl_setopt($ch, CURLOPT_NOBODY, 1);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    $response = curl_exec($ch);
+    curl_close($ch);
+
+    // Split the response by the double CRLF that separates header blocks
+    $header_blocks = explode("\r\n\r\n", trim($response));
+    // Get the last header block, which corresponds to the final response after redirects
+    $last_header_block = end($header_blocks);
+    $lines = explode("\n", trim($last_header_block));
+
     $http_headers = [];
     foreach ($lines as $line) {
         if (preg_match('/^([^:]+):\s*(.*)$/', trim($line), $matches)) {
@@ -217,7 +339,7 @@ function performDomainLookup(string $domain): array
     $builder->addRdataFormatter('TXT', 'specialTxtFormatter');
 
     return [
-        "whois" => $whois,
+        "domain" => $whois,
         "http_headers" => $http_headers,
         "dns_records" => $dns_records,
         "ip_lookup" => $ip_lookup,
@@ -225,7 +347,6 @@ function performDomainLookup(string $domain): array
         "zone" => $builder->build($zone)
     ];
 }
-
 
 // Handle AJAX requests for history management
 if (isset($_REQUEST['action'])) {
@@ -380,17 +501,34 @@ function runWebApp()
         die();
     }
 
-    if (isset($_REQUEST['raw_whois'])) {
-        header('Content-Type: text/plain');
-        $domain_to_check = trim($_REQUEST['raw_whois']);
+    if (isset($_REQUEST['raw_domain'])) {
+        $domain_to_check = trim($_REQUEST['raw_domain']);
         if (filter_var($domain_to_check, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
-            echo shell_exec("whois " . escapeshellarg($domain_to_check));
+            // Attempt RDAP lookup first
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, "https://rdap.org/domain/" . $domain_to_check);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            $rdap_data = curl_exec($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($http_code === 200 && !empty($rdap_data)) {
+                header('Content-Type: application/json');
+                // Decode and re-encode with pretty print
+                $decoded_json = json_decode($rdap_data);
+                echo json_encode($decoded_json, JSON_PRETTY_PRINT);
+            } else {
+                // Fallback to shell whois
+                header('Content-Type: text/plain');
+                echo shell_exec("whois " . escapeshellarg($domain_to_check));
+            }
         } else {
+            header('Content-Type: text/plain');
             echo "Invalid domain provided.";
         }
         die();
     }
-
 
     if (!isset($_REQUEST['domain'])) {
         return; // This allows the HTML to be rendered on first load
@@ -578,7 +716,7 @@ if (php_sapi_name() === 'cli') {
                     </v-text-field>
                     <v-alert type="warning" v-for="error in response.errors" class="mb-3" v-html="error"></v-alert>
 
-                    <v-row v-if="response.whois && response.whois != ''">
+                    <v-row v-if="response.domain && response.domain != ''">
                         <v-col cols="12">
                             <v-btn v-if="otherVersions.length > 0" @click="showVersionsModal = true" color="primary" variant="tonal" class="mb-4">
                                 <v-icon start>mdi-history</v-icon>
@@ -590,7 +728,7 @@ if (php_sapi_name() === 'cli') {
                                 <v-btn size="small" @click="showRawWhois()" class="position-absolute right-0 mt-2 mr-4" variant="tonal">
                                     View raw
                                 </v-btn>
-                                <v-card-title>Whois</v-card-title>
+                                <v-card-title>Domain</v-card-title>
                                 <v-card-text>
                                     <v-table density="compact">
                                         <template v-slot:default>
@@ -601,7 +739,7 @@ if (php_sapi_name() === 'cli') {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                <tr v-for='record in response.whois'>
+                                                <tr v-for='record in response.domain'>
                                                     <td>{{ record.name }}</td>
                                                     <td @contextmenu="showContextMenu($event, record.value)">{{ record.value }}</td>
                                                 </tr>
@@ -729,7 +867,7 @@ if (php_sapi_name() === 'cli') {
                     </v-list>
                 </v-menu>
 
-                <v-dialog v-model="dialog.show" max-width="800">
+                <v-dialog v-model="dialog.show" max-width="1100">
                     <v-card>
                         <v-card-title class="d-flex align-center">
                             <span class="text-h5">{{ dialog.title }}</span>
@@ -737,7 +875,7 @@ if (php_sapi_name() === 'cli') {
                             <v-btn icon="mdi-close" variant="text" @click="dialog.show = false"></v-btn>
                         </v-card-title>
                         <v-card-text class="pt-4">
-                            <pre>{{ dialog.content }}</pre>
+                            <pre class="language-json text-body-2" style="border-radius:4px;border:0px"><code>{{ dialog.content }}</code></pre>
                         </v-card-text>
                     </v-card>
                 </v-dialog>
@@ -850,7 +988,7 @@ if (php_sapi_name() === 'cli') {
                         message: ""
                     },
                     response: {
-                        whois: "",
+                        domain: "",
                         errors: [],
                         zone: "",
                         timestamp: null
@@ -884,7 +1022,7 @@ if (php_sapi_name() === 'cli') {
                     this.loading = true;
                     // Reset the response object to clear the old data
                     this.response = {
-                        whois: "",
+                        domain: "",
                         errors: [],
                         zone: "",
                         timestamp: null
@@ -981,13 +1119,14 @@ if (php_sapi_name() === 'cli') {
                         .then(response => response.text())
                         .then(data => {
                             this.dialog.content = data.trim() === '' ? 'No results found.' : data;
+                            Prism.highlightAll();
                         });
                 },
                 showRawWhois() {
-                    this.dialog.title = `Raw Whois for: ${this.domain}`;
+                    this.dialog.title = `Raw response for: ${this.domain}`;
                     this.dialog.content = 'Loading...';
                     this.dialog.show = true;
-                    fetch(`?raw_whois=${encodeURIComponent(this.domain)}`)
+                    fetch(`?raw_domain=${encodeURIComponent(this.domain)}`)
                         .then(response => response.text())
                         .then(data => {
                             this.dialog.content = data.trim() === '' ? 'No results found.' : data;
@@ -1039,7 +1178,7 @@ if (php_sapi_name() === 'cli') {
                                 this.loadHistory(); // Reload main history in case the deleted item was the most recent
                                 // If the currently viewed item is the one deleted, clear the view
                                 if (this.response.timestamp === item.timestamp) {
-                                    this.response.whois = ""; // Clear the main view
+                                    this.response.domain = ""; // Clear the main view
                                 }
                             }
                         });
