@@ -591,9 +591,7 @@ run();
                     <v-toolbar-title>Periscope</v-toolbar-title>
                     <v-spacer></v-spacer>
                     <v-btn icon @click="showHistoryModal = true" class="mr-2 position-relative">
-                        <v-badge location="top right" color="error" :content="historyItems.length" bordered :model-value="historyItems.length > 0">
-                            <v-icon>mdi-history</v-icon>
-                        </v-badge>
+                        <v-icon>mdi-history</v-icon>
                     </v-btn>
                     <v-btn icon @click="toggleTheme()">
                         <v-icon>{{ currentTheme === 'dark' ? 'mdi-white-balance-sunny' : 'mdi-moon-waning-crescent' }}</v-icon>
