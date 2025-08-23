@@ -649,7 +649,10 @@ if (php_sapi_name() === 'cli') {
 
         /* Base Toolbar (light mode default) */
         .top-toolbar {
-            background: linear-gradient(to bottom right, #fff, #fff);
+            background: linear-gradient(90deg, #0E7490, #0A3D62);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            color: #ffffff;
+            box-shadow: 0 2px 12px rgba(10, 61, 98, 0.25);
             border-radius: 2rem;
             padding: 0.75rem 1.5rem;
             display: flex;
@@ -662,31 +665,34 @@ if (php_sapi_name() === 'cli') {
             border: 1px solid #08263d;
         }
 
-        .top-toolbar a {
-            color: #004d73;
-            text-decoration: none;
-            margin: 0 0.75rem;
-            font-weight: 600;
-            transition: color 0.2s;
+        .top-toolbar .v-toolbar-title,
+        .top-toolbar a,
+        .top-toolbar .v-icon,
+        .top-toolbar .v-btn {
+        color: #ffffff;
         }
 
         .top-toolbar a:hover {
-            color: #0077be;
+        color: #E6F7FF;
         }
 
         /* 🌙 Dark Mode Styles */
         .v-theme--dark .top-toolbar {
-            background: linear-gradient(to bottom right, #000, #000);
-            border: 1px solid #f6ecdb;
+            background: linear-gradient(90deg, #0B1E33, #09263F);
+            border: 1px solid rgba(246, 236, 219, 0.25);
+            color: #f6ecdb;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
         }
 
-        .v-theme--dark .top-toolbar a {
-            color: #b3e5fc;
-            /* Lighter, soft blue text */
+        .v-theme--dark .top-toolbar .v-toolbar-title,
+        .v-theme--dark .top-toolbar a,
+        .v-theme--dark .top-toolbar .v-icon,
+        .v-theme--dark .top-toolbar .v-btn {
+        color: #f6ecdb;
         }
 
         .v-theme--dark .top-toolbar a:hover {
-            color: #ffffff;
+        color: #ffffff;
         }
 
         /* --- Prism JS Theme Overrides for DNS Zone --- */
