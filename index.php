@@ -248,11 +248,16 @@ function performDomainLookup(string $domain): array
             $value = shell_exec("host -t $type $pre$domain | grep 'alias for' | awk '{print \$NF}'");
         }
         $value = trim($value);
+        if (str_starts_with($value, ';')) {
+            continue;
+        }
         if (empty($value)) continue;
-
         if ($type == "a" && preg_match("/[a-z]/i", $value)) { // Check if A record is actually a CNAME
             $type = "cname";
             $value = trim(shell_exec("dig $pre$domain $type +short | sort -n"));
+            if (str_starts_with($value, ';')) {
+                continue;
+            }
             if (empty($value)) continue;
         }
 
