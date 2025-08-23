@@ -911,7 +911,14 @@ run();
             },
             methods: {
                 lookupDomain() {
-                    this.loading = true
+                    this.loading = true;
+                    // Reset the response object to clear the old data
+                    this.response = {
+                        whois: "",
+                        errors: [],
+                        zone: "",
+                        timestamp: null
+                    };
                     this.domain = this.extractHostname(this.domain)
                     fetch("?domain=" + this.domain)
                         .then(response => response.json())
@@ -924,6 +931,11 @@ run();
                         .then(done => {
                             Prism.highlightAll()
                         })
+                        .catch(error => {
+                            this.loading = false;
+                            this.response.errors.push("An error occurred while fetching data. Please try again.");
+                            console.error("Fetch Error:", error);
+                        });
                 },
                 extractHostname(url) {
                     var hostname;
