@@ -39,4 +39,26 @@ git clone https://github.com/austinginder/periscope.git .
 
 Then open https://periscope.localhost in your browser.
 
+### Using from the CLI
+
+It's also possible to use from the CLI for scripting purposes by running `php index.php "domain.tld"` as shown in the following example.
+
+```
+php index.php "austinginder.com"
+```
+The response would be:
+```
+Looking up domain: austinginder.com...
+
+--- Summary for austinginder.com ---
+Registrar:     Spaceship, Inc.
+IP Addresses:  162.159.135.42
+Name Servers:  ns1.anchor.host., ns2.anchor.host., ns3.anchor.host., ns4.anchor.host.
+---------------------------
+
+Full report saved to database.
+
+```
+
+
 ![](screenshot.webp)

@@ -37,6 +37,196 @@ function getDbConnection(): PDO
     }
 }
 
+/**
+ * Performs the full domain lookup and returns the results as an array.
+ *
+ * @param string $domain The domain to look up.
+ * @return array The lookup results.
+ */
+function performDomainLookup(string $domain): array
+{
+    $errors = [];
+    $ip_lookup = [];
+    $dns_records = [];
+
+    $required_bins = ["whois", "dig", "host"];
+    foreach ($required_bins as $bin) {
+        $output = null;
+        $return_var = null;
+        exec("command -v $bin", $output, $return_var);
+        if ($return_var != 0) {
+            $errors[] = "Required command \"$bin\" is not installed.";
+        }
+    }
+
+    if (!filter_var($domain, FILTER_VALIDATE_DOMAIN)) {
+        $errors[] = "Invalid domain.";
+    }
+
+    if (filter_var($domain, FILTER_VALIDATE_DOMAIN) && strpos($domain, '.') === false) {
+        $errors[] = "Invalid domain.";
+    }
+
+    if (strlen($domain) < 4) {
+        $errors[] = "No domain name is that short.";
+    }
+
+    if (strlen($domain) > 80) {
+        $errors[] = "Too long.";
+    }
+
+    if (count($errors) > 0) {
+        return ["errors" => $errors];
+    }
+
+    $zone = new Zone($domain . ".");
+    $zone->setDefaultTtl(3600);
+
+    $whois_raw = shell_exec("whois $domain | grep -E 'Name Server|Registrar:|Domain Name:|Updated Date:|Creation Date:|Registrar IANA ID:Domain Status:|Reseller:'");
+    if (empty($whois_raw)) {
+        $errors[] = "Domain not found.";
+        return ["errors" => $errors];
+    }
+
+    $whois_lines = explode("\n", trim($whois_raw));
+    $whois = [];
+    foreach ($whois_lines as $record) {
+        $split = explode(":", trim($record), 2);
+        if (count($split) < 2) continue;
+        $name = trim($split[0]);
+        $value = trim($split[1]);
+        if ($name == "Name Server" || $name == "Domain Name") {
+            $value = strtolower($value);
+        }
+        $whois[] = ["name" => $name, "value" => $value];
+    }
+    $whois = array_map("unserialize", array_unique(array_map("serialize", $whois)));
+    array_multisort(array_column($whois, 'name'), SORT_ASC, array_column($whois, 'value'), SORT_ASC, $whois);
+
+    $ips = explode("\n", trim(shell_exec("dig $domain +short")));
+    foreach ($ips as $ip) {
+        if (empty($ip) || !filter_var($ip, FILTER_VALIDATE_IP)) {
+            continue;
+        }
+        $response = shell_exec("whois $ip | grep -E 'NetName:|Organization:|OrgName:'");
+        $ip_lookup["$ip"] = empty($response) ? "" : trim($response);
+    }
+
+    $wildcard_cname = "";
+    $wildcard_a = "";
+    $records_to_check = [
+        ["a" => ""], ["a" => "*"], ["a" => "mail"], ["a" => "remote"], ["a" => "www"], ["a" => "blog"],
+        ["a" => "shop"], ["a" => "portal"], ["a" => "api"], ["a" => "dev"], ["cname" => "*"], ["cname" => "www"],
+        ["cname" => "blog"], ["cname" => "shop"], ["cname" => "portal"], ["cname" => "api"], ["cname" => "dev"],
+        ["cname" => "autodiscover"], ["cname" => "sip"], ["cname" => "lyncdiscover"], ["cname" => "enterpriseregistration"],
+        ["cname" => "enterpriseenrollment"], ["cname" => "email.mg"], ["cname" => "msoid"], ["cname" => "_acme-challenge"],
+        ["cname" => "k1._domainkey"], ["cname" => "k2._domainkey"], ["cname" => "k3._domainkey"], ["cname" => "s1._domainkey"],
+        ["cname" => "s2._domainkey"], ["cname" => "selector1._domainkey"], ["cname" => "selector2._domainkey"],
+        ["cname" => "ctct1._domainkey"], ["cname" => "ctct2._domainkey"], ["cname" => "mail"], ["cname" => "ftp"],
+        ["mx" => ""], ["mx" => "mg"], ["txt" => ""], ["txt" => "_dmarc"], ["txt" => "_amazonses"], ["txt" => "_acme-challenge"],
+        ["txt" => "_acme-challenge.www"], ["txt" => " _mailchannels"], ["txt" => "default._domainkey"], ["txt" => "google._domainkey"],
+        ["txt" => "mg"], ["txt" => "smtp._domainkey.mg"], ["txt" => "k1._domainkey"], ["txt" => "default._bimi"],
+        ["srv" => "_sip._tls"], ["srv" => "_sipfederationtls._tcp"], ["srv" => "_autodiscover._tcp"], ["srv" => "_submissions._tcp"],
+        ["srv" => "_imaps._tcp"], ["ns" => ""], ["soa" => ""],
+    ];
+
+    foreach ($records_to_check as $record_info) {
+        $type = key($record_info);
+        $name = $record_info[$type];
+        $pre = empty($name) ? "" : "{$name}.";
+        $value = shell_exec("(host -t $type $pre$domain | grep -q 'is an alias for') && echo \"\" || dig $pre$domain $type +short | sort -n");
+        if ($type == "cname") {
+            $value = shell_exec("host -t $type $pre$domain | grep 'alias for' | awk '{print \$NF}'");
+        }
+        $value = trim($value);
+        if (empty($value)) continue;
+
+        if ($type == "a" && preg_match("/[a-z]/i", $value)) { // Check if A record is actually a CNAME
+            $type = "cname";
+            $value = trim(shell_exec("dig $pre$domain $type +short | sort -n"));
+            if (empty($value)) continue;
+        }
+
+        $setName = empty($name) ? "@" : $name;
+        $record_values = explode("\n", $value);
+
+        foreach ($record_values as $record_value) {
+            try {
+                $record = new ResourceRecord();
+                $record->setName($setName);
+                $record->setClass('IN');
+
+                switch ($type) {
+                    case 'soa':
+                        $parts = explode(" ", $record_value);
+                        $record->setRdata(Factory::Soa($parts[0], $parts[1], $parts[2], $parts[3], $parts[4], $parts[5], $parts[6]));
+                        break;
+                    case 'ns':
+                        $record->setRdata(Factory::Ns($record_value));
+                        break;
+                    case 'a':
+                        if ($name == "*") $wildcard_a = $record_values;
+                        if (!empty($wildcard_a) && $wildcard_a == $record_values && $name != "*") continue 2;
+                        $record->setRdata(Factory::A($record_value));
+                        break;
+                    case 'cname':
+                        if ($name == "*") $wildcard_cname = $record_value;
+                        if (!empty($wildcard_cname) && $wildcard_cname == $record_value && $name != "*") continue 2;
+                        $record->setRdata(Factory::Cname($record_value));
+                        break;
+                    case 'srv':
+                        $parts = explode(" ", $record_value);
+                        if (count($parts) != 4) continue 2;
+                        $record->setRdata(Factory::Srv($parts[0], $parts[1], $parts[2], $parts[3]));
+                        break;
+                    case 'mx':
+                        $parts = explode(" ", $record_value);
+                        if (count($parts) != 2) continue 2;
+                        $record->setRdata(Factory::Mx($parts[0], $parts[1]));
+                        break;
+                    case 'txt':
+                        $record->setRdata(Factory::Txt(trim($record_value, '"')));
+                        break;
+                    default:
+                        continue 2;
+                }
+                $zone->addResourceRecord($record);
+            } catch (Exception $e) {
+                // Ignore errors from the DNS library for invalid records
+            }
+        }
+        $dns_records[] = ["type" => $type, "name" => $name, "value" => $value];
+    }
+
+    $response = shell_exec("curl -sLI $domain | awk 'BEGIN{RS=\"\\r\\n\\r\\n\"}; END{print}'");
+    $lines = explode("\n", trim($response));
+    $http_headers = [];
+    foreach ($lines as $line) {
+        if (preg_match('/^([^:]+):\s*(.*)$/', trim($line), $matches)) {
+            $key = strtolower($matches[1]);
+            $value = $matches[2];
+            if (isset($http_headers[$key])) {
+                $http_headers[$key] = is_array($http_headers[$key]) ? [...$http_headers[$key], $value] : [$http_headers[$key], $value];
+            } else {
+                $http_headers[$key] = $value;
+            }
+        }
+    }
+
+    $builder = new AlignedBuilder();
+    $builder->addRdataFormatter('TXT', 'specialTxtFormatter');
+
+    return [
+        "whois" => $whois,
+        "http_headers" => $http_headers,
+        "dns_records" => $dns_records,
+        "ip_lookup" => $ip_lookup,
+        "errors" => [],
+        "zone" => $builder->build($zone)
+    ];
+}
+
+
 // Handle AJAX requests for history management
 if (isset($_REQUEST['action'])) {
     $action = $_REQUEST['action'];
@@ -128,27 +318,34 @@ if (isset($_REQUEST['action'])) {
     die();
 }
 
-
+/**
+ * Formats TXT records for DNS zone file output, splitting long strings.
+ *
+ * @param Badcow\DNS\Rdata\TXT $rdata The RDATA object.
+ * @param int $padding The padding for alignment.
+ * @return string The formatted string.
+ */
 function specialTxtFormatter(Badcow\DNS\Rdata\TXT $rdata, int $padding): string
 {
-    //If the text length is less than or equal to 50 characters, just return it unaltered.
-    if (strlen($rdata->getText()) <= 500) {
-        return sprintf('"%s"', addcslashes($rdata->getText(), '"\\'));
+    $text = $rdata->getText();
+    if (strlen($text) <= 500) {
+        return sprintf('"%s"', addcslashes($text, '"\\'));
     }
 
     $returnVal = "(\n";
-    $chunks = str_split($rdata->getText(), 500);
+    $chunks = str_split($text, 255); // Split into 255-char chunks as per RFC
     foreach ($chunks as $chunk) {
-        $returnVal .= str_repeat(' ', $padding) .
-            sprintf('"%s"', addcslashes($chunk, '"\\')) .
-            "\n";
+        $returnVal .= str_repeat(' ', $padding) . sprintf('"%s"', addcslashes($chunk, '"\\')) . "\n";
     }
     $returnVal .= str_repeat(' ', $padding) . ")";
 
     return $returnVal;
 }
 
-function run()
+/**
+ * Handles all web-based requests (UI, context menus, etc.).
+ */
+function runWebApp()
 {
     // Handle context menu lookups
     if (isset($_REQUEST['dig'])) {
@@ -176,8 +373,7 @@ function run()
         header('Content-Type: text/plain');
         $ip_to_check = trim($_REQUEST['whois']);
         if (filter_var($ip_to_check, FILTER_VALIDATE_IP)) {
-            $escaped_ip = escapeshellarg($ip_to_check);
-            echo shell_exec("whois $escaped_ip");
+            echo shell_exec("whois " . escapeshellarg($ip_to_check));
         } else {
             echo "Invalid IP address provided.";
         }
@@ -188,324 +384,33 @@ function run()
         header('Content-Type: text/plain');
         $domain_to_check = trim($_REQUEST['raw_whois']);
         if (filter_var($domain_to_check, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
-            $escaped_domain = escapeshellarg($domain_to_check);
-            echo shell_exec("whois $escaped_domain");
+            echo shell_exec("whois " . escapeshellarg($domain_to_check));
         } else {
             echo "Invalid domain provided.";
         }
         die();
     }
 
+
     if (!isset($_REQUEST['domain'])) {
-        return;
+        return; // This allows the HTML to be rendered on first load
     }
 
+    header('Content-Type: application/json');
     $domain = $_REQUEST['domain'];
-    $errors = [];
-    $ip_lookup = [];
-    $dns_records = [];
-    $required_bins = ["whois", "dig", "host"];
+    $final_response = performDomainLookup($domain);
 
-    foreach ($required_bins as $bin) {
-        $output = null;
-        $return_var = null;
-        exec("command -v $bin", $output, $return_var);
-        if ($return_var != 0) {
-            $errors[] = "Required command \"$bin\" is not installed.";
-        }
-    }
-
-    if (!filter_var($domain, FILTER_VALIDATE_DOMAIN)) {
-        $errors[] = "Invalid domain.";
-    }
-
-    if (filter_var($domain, FILTER_VALIDATE_DOMAIN) && strpos($domain, '.') === false) {
-        $errors[] = "Invalid domain.";
-    }
-
-    if (strlen($domain) < 4) {
-        $errors[] = "No domain name is that short.";
-    }
-
-    if (strlen($domain) > 80) {
-        $errors[] = "Too long.";
-    }
-
-    if (count($errors) > 0) {
-        echo json_encode([
-            "errors" => $errors,
-        ]);
+    if (!empty($final_response['errors'])) {
+        echo json_encode($final_response);
         die();
     }
-
-    $zone = new Zone($domain . ".");
-    $zone->setDefaultTtl(3600);
-
-    $bash_ip_lookup = <<<EOT
-for ip in $( dig $domain +short ); do
-    echo "Details on \$ip"
-    whois \$ip | grep -E 'NetName:|Organization:|OrgName:'
-done
-EOT;
-
-    $whois = shell_exec("whois $domain | grep -E 'Name Server|Registrar:|Domain Name:|Updated Date:|Creation Date:|Registrar IANA ID:Domain Status:|Reseller:'");
-    $whois = empty($whois) ? "" : trim($whois);
-
-    if (empty($whois)) {
-        $errors[] = "Domain not found.";
-        echo json_encode([
-            "errors" => $errors,
-        ]);
-        die();
-    }
-
-    $whois = explode("\n", $whois);
-    foreach ($whois as $key => $record) {
-        $split = explode(":", trim($record));
-        $name = trim($split[0]);
-        $value = trim($split[1] ?? '');
-        if ($name == "Name Server" || $name == "Domain Name") {
-            $value = strtolower($value);
-        }
-        $whois[$key] = ["name" => $name, "value" => $value];
-    }
-    $whois = array_map("unserialize", array_unique(array_map("serialize", $whois)));
-    $col_name = array_column($whois, 'name');
-    $col_value = array_column($whois, 'value');
-    array_multisort($col_name, SORT_ASC, $col_value, SORT_ASC, $whois);
-    $ips = explode("\n", trim(shell_exec("dig $domain +short")));
-    foreach ($ips as $ip) {
-        if (empty($ip)) {
-            continue;
-        }
-        $response = shell_exec("whois $ip | grep -E 'NetName:|Organization:|OrgName:'");
-        $response = empty($response) ? "" : trim($response);
-        $ip_lookup["$ip"] = $response;
-    }
-
-    $wildcard_cname = "";
-    $wildcard_a = "";
-    $records_to_check = [
-        ["a" => ""],
-        ["a" => "*"],
-        ["a" => "mail"],
-        ["a" => "remote"],
-        ["a" => "www"],
-        ["a" => "blog"],
-        ["a" => "shop"],
-        ["a" => "portal"],
-        ["a" => "api"],
-        ["a" => "dev"],
-        ["cname" => "*"],
-        ["cname" => "www"],
-        ["cname" => "blog"],
-        ["cname" => "shop"],
-        ["cname" => "portal"],
-        ["cname" => "api"],
-        ["cname" => "dev"],
-        ["cname" => "autodiscover"],
-        ["cname" => "sip"],
-        ["cname" => "lyncdiscover"],
-        ["cname" => "enterpriseregistration"],
-        ["cname" => "enterpriseenrollment"],
-        ["cname" => "email.mg"],
-        ["cname" => "msoid"],
-        ["cname" => "_acme-challenge"],
-        ["cname" => "k1._domainkey"],
-        ["cname" => "k2._domainkey"],
-        ["cname" => "k3._domainkey"],
-        ["cname" => "s1._domainkey"],
-        ["cname" => "s2._domainkey"],
-        ["cname" => "selector1._domainkey"],
-        ["cname" => "selector2._domainkey"],
-        ["cname" => "ctct1._domainkey"],
-        ["cname" => "ctct2._domainkey"],
-        ["cname" => "mail"],
-        ["cname" => "ftp"],
-        ["mx" => ""],
-        ["mx" => "mg"],
-        ["txt" => ""],
-        ["txt" => "_dmarc"],
-        ["txt" => "_amazonses"],
-        ["txt" => "_acme-challenge"],
-        ["txt" => "_acme-challenge.www"],
-        ["txt" => " _mailchannels"],
-        ["txt" => "default._domainkey"],
-        ["txt" => "google._domainkey"],
-        ["txt" => "mg"],
-        ["txt" => "smtp._domainkey.mg"],
-        ["txt" => "k1._domainkey"],
-        ["txt" => "default._bimi"],
-        ["srv" => "_sip._tls"],
-        ["srv" => "_sipfederationtls._tcp"],
-        ["srv" => "_autodiscover._tcp"],
-        ["srv" => "_submissions._tcp"],
-        ["srv" => "_imaps._tcp"],
-        ["ns" => ""],
-        ["soa" => ""],
-    ];
-
-    foreach ($records_to_check as $record) {
-        $pre = "";
-        $type = key($record);
-        $name = $record[$type];
-        if (!empty($name)) {
-            $pre = "{$name}.";
-        }
-        $value = shell_exec("(host -t $type $pre$domain | grep -q 'is an alias for') && echo \"\" || dig $pre$domain $type +short | sort -n");
-        if ($type == "cname") {
-            $value = shell_exec("host -t $type $pre$domain | grep 'alias for' | awk '{print \$NF}'");
-        }
-        $value = empty($value) ? "" : trim($value);
-        if (empty($value)) {
-            continue;
-        }
-        if ($type == "soa") {
-            $record_value = explode(" ", $value);
-            $setName = empty($name) ? "@" : $name;
-            $record = new ResourceRecord;
-            $record->setName($setName);
-            $record->setRdata(Factory::Soa($record_value[0], $record_value[1], $record_value[2], $record_value[3], $record_value[4], $record_value[5], $record_value[6]));
-            $zone->addResourceRecord($record);
-            continue;
-        }
-        if ($type == "ns") {
-            $record_values = explode("\n", $value);
-            foreach ($record_values as $record_value) {
-                $setName = empty($name) ? "@" : $name;
-                $record = new ResourceRecord;
-                $record->setName($setName);
-                $record->setRdata(Factory::Ns($record_value));
-                $zone->addResourceRecord($record);
-            }
-        }
-        // Verify A record is not a CNAME record
-        if ($type == "a" && preg_match("/[a-z]/i", $value)) {
-            $type = "cname";
-            $value = shell_exec("dig $pre$domain $type +short | sort -n");
-            $value = empty($value) ? "" : trim($value);
-            if (empty($value)) {
-                continue;
-            }
-        }
-        if ($type == "a") {
-            $record_values = explode("\n", $value);
-            if (!empty($wildcard_a) && $wildcard_a == $record_values) {
-                continue;
-            }
-            if ($name == "*") {
-                $wildcard_a = $record_values;
-            }
-            $setName = empty($name) ? "@" : $name;
-            foreach ($record_values as $record_value) {
-                $record = new ResourceRecord;
-                $record->setName($setName);
-                $record->setRdata(Factory::A($record_value));
-                $zone->addResourceRecord($record);
-            }
-        }
-        if ($type == "cname") {
-            if ($name == "*") {
-                $wildcard_cname = $value;
-                continue;
-            }
-            if (!empty($wildcard_cname) && $wildcard_cname == $value) {
-                continue;
-            }
-            $setName = empty($name) ? $domain : $name;
-            $record = new ResourceRecord;
-            $record->setName($setName);
-            $record->setRdata(Factory::Cname($value));
-            $zone->addResourceRecord($record);
-        }
-        if ($type == "srv") {
-            $record_values = explode(" ", $value);
-            if (count($record_values) != "4") {
-                continue;
-            }
-            $setName = empty($name) ? "@" : $name;
-            $record = new ResourceRecord;
-            $record->setName($setName);
-            $record->setRdata(Factory::Srv($record_values[0], $record_values[1], $record_values[2], $record_values[3]));
-            $zone->addResourceRecord($record);
-        }
-        if ($type == "mx") {
-            $setName = empty($name) ? "@" : $name;
-            $record_values = explode("\n", $value);
-            usort($record_values, function ($a, $b) {
-                $a_value = explode(" ", $a);
-                $b_value = explode(" ", $b);
-                return (int) $a_value[0] - (int) $b_value[0];
-            });
-            foreach ($record_values as $record_value) {
-                $record_value = explode(" ", $record_value);
-                if (count($record_value) != "2") {
-                    continue;
-                }
-                $mx_priority = $record_value[0];
-                $mx_value = $record_value[1];
-                $record = new ResourceRecord;
-                $record->setName($setName);
-                $record->setRdata(Factory::Mx($mx_priority, $mx_value));
-                $zone->addResourceRecord($record);
-            }
-        }
-        if ($type == "txt") {
-            $record_values = explode("\n", $value);
-            $setName = empty($name) ? "@" : "$name";
-            foreach ($record_values as $record_value) {
-                $record = new ResourceRecord;
-                $record->setName($setName);
-                $record->setClass('IN');
-                $record->setRdata(Factory::Txt(trim($record_value, '"'), 0, 200));
-                $zone->addResourceRecord($record);
-            }
-        }
-        $dns_records[] = ["type" => $type, "name" => $name, "value" => $value];
-    }
-
-    $response = shell_exec("curl -sLI $domain | awk 'BEGIN{RS=\"\\r\\n\\r\\n\"}; END{print}'");
-    $lines = explode("\n", trim($response));
-    $http_headers = [];
-    foreach ($lines as $line) {
-        // Trim whitespace from each line
-        $line = trim($line);
-        // Match key-value pairs (lines with a colon)
-        if (preg_match('/^([^:]+):\s*(.*)$/', $line, $matches)) {
-            $key = strtolower($matches[1]); // Use lowercase keys for consistency
-            $value = $matches[2];
-            // Handle duplicate keys (e.g., "vary" appears twice)
-            if (isset($http_headers[$key])) {
-                if (is_array($http_headers[$key])) {
-                    $http_headers[$key][] = $value;
-                } else {
-                    $http_headers[$key] = [$http_headers[$key], $value];
-                }
-            } else {
-                $http_headers[$key] = $value;
-            }
-        }
-    }
-
-    $builder = new AlignedBuilder();
-    $builder->addRdataFormatter('TXT', 'specialTxtFormatter');
-
-    $final_response = [
-        "whois" => $whois,
-        "http_headers" => $http_headers,
-        "dns_records" => $dns_records,
-        "ip_lookup" => $ip_lookup,
-        "errors" => [],
-        "zone" => $builder->build($zone)
-    ];
 
     // Save result to the database
     $db = getDbConnection();
-    // Use simple INSERT to allow multiple versions of the same domain
     $stmt = $db->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, ?)");
     $timestamp = time();
     $stmt->execute([$domain, $timestamp, json_encode($final_response)]);
-    
+
     // Add timestamp to the response for the frontend
     $final_response['timestamp'] = $timestamp;
 
@@ -513,7 +418,72 @@ EOT;
     die();
 }
 
-run();
+/**
+ * Handles CLI requests.
+ *
+ * @param array $argv Command-line arguments.
+ * @param int $argc Command-line argument count.
+ */
+function runCliApp(array $argv, int $argc)
+{
+    if ($argc < 2) {
+        echo "Usage: php index.php <domain>\n";
+        exit(1);
+    }
+
+    $domain = $argv[1];
+    echo "Looking up domain: $domain...\n\n";
+
+    $final_response = performDomainLookup($domain);
+
+    if (!empty($final_response['errors'])) {
+        echo "Errors encountered:\n";
+        foreach ($final_response['errors'] as $error) {
+            echo "- $error\n";
+        }
+        exit(1);
+    }
+
+    // Save result to the database
+    $db = getDbConnection();
+    $stmt = $db->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, ?)");
+    $timestamp = time();
+    $stmt->execute([$domain, $timestamp, json_encode($final_response)]);
+
+    // --- Generate CLI Summary ---
+    $registrar = 'N/A';
+    foreach ($final_response['whois'] as $item) {
+        if (stripos($item['name'], 'Registrar') !== false) {
+            $registrar = $item['value'];
+            break;
+        }
+    }
+
+    $ips = array_keys($final_response['ip_lookup']);
+    $nameservers = [];
+    foreach ($final_response['dns_records'] as $record) {
+        if (strtolower($record['type']) === 'ns') {
+            $nameservers = array_merge($nameservers, explode("\n", $record['value']));
+        }
+    }
+    $nameservers = array_unique($nameservers);
+
+    echo "--- Summary for $domain ---\n";
+    echo "Registrar:     " . $registrar . "\n";
+    echo "IP Addresses:  " . (empty($ips) ? 'N/A' : implode(', ', $ips)) . "\n";
+    echo "Name Servers:  " . (empty($nameservers) ? 'N/A' : implode(', ', $nameservers)) . "\n";
+    echo "---------------------------\n";
+    echo "\nFull report saved to database.\n";
+    exit(0);
+}
+
+// --- Main Application Dispatcher ---
+if (php_sapi_name() === 'cli') {
+    runCliApp($argv, $argc);
+} else {
+    runWebApp();
+    // The web app continues to render the HTML below
+}
 
 ?><!DOCTYPE html>
 <html>
