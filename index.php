@@ -26,7 +26,8 @@ function getDbConnection(): PDO
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             domain TEXT NOT NULL,
             timestamp INTEGER NOT NULL,
-            data TEXT NOT NULL
+            data TEXT NOT NULL,
+            UNIQUE(domain, timestamp)
         )");
         return $db;
     } catch (PDOException $e) {
