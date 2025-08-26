@@ -159,7 +159,6 @@ function performDomainLookup(string $domain): array
     $errors = [];
     $ip_lookup = [];
     $dns_records = [];
-
     $required_bins = ["whois", "dig", "host"];
     foreach ($required_bins as $bin) {
         $output = null;
@@ -192,10 +191,8 @@ function performDomainLookup(string $domain): array
 
     $zone = new Zone($domain . ".");
     $zone->setDefaultTtl(3600);
-
     // Attempt RDAP lookup first
     $whois = rdapLookup($domain);
-
     // If RDAP fails, fall back to shell whois
     if (empty($whois)) {
         $whois_raw = shell_exec("whois " . escapeshellarg($domain));
@@ -213,7 +210,6 @@ function performDomainLookup(string $domain): array
 
     $whois = array_map("unserialize", array_unique(array_map("serialize", $whois)));
     array_multisort(array_column($whois, 'name'), SORT_ASC, array_column($whois, 'value'), SORT_ASC, $whois);
-
     $ips = gethostbynamel($domain);
     if ($ips === false) {
         $ips = [];
@@ -228,7 +224,7 @@ function performDomainLookup(string $domain): array
     }
 
     $wildcard_cname = "";
-    $wildcard_a = "";
+    $wildcard_a = []; // Changed to array to handle multiple IPs
     $records_to_check = [
         ["a" => ""], ["a" => "*"], ["a" => "mail"], ["a" => "remote"], ["a" => "www"], ["a" => "blog"],
         ["a" => "shop"], ["a" => "portal"], ["a" => "api"], ["a" => "dev"], ["cname" => "*"], ["cname" => "www"],
@@ -244,7 +240,6 @@ function performDomainLookup(string $domain): array
         ["srv" => "_sip._tls"], ["srv" => "_sipfederationtls._tcp"], ["srv" => "_autodiscover._tcp"], ["srv" => "_submissions._tcp"],
         ["srv" => "_imaps._tcp"], ["ns" => ""], ["soa" => ""],
     ];
-
     foreach ($records_to_check as $record_info) {
         $type = key($record_info);
         $name = $record_info[$type];
@@ -267,9 +262,24 @@ function performDomainLookup(string $domain): array
             if (empty($value)) continue;
         }
 
+        if ($type == 'a') {
+            $current_a_values = explode("\n", $value);
+            if ($name === '*') {
+                $wildcard_a = $current_a_values;
+            } elseif (!empty($wildcard_a) && $wildcard_a == $current_a_values) {
+                continue; // This is a duplicate of the wildcard A record, so skip it entirely.
+            }
+        }
+        if ($type == 'cname') {
+            if ($name === '*') {
+                $wildcard_cname = $value;
+            } elseif (!empty($wildcard_cname) && $wildcard_cname == $value) {
+                continue; // This is a duplicate of the wildcard CNAME record, so skip it entirely.
+            }
+        }
+
         $setName = empty($name) ? "@" : $name;
         $record_values = explode("\n", $value);
-
         foreach ($record_values as $record_value) {
             try {
                 $record = new ResourceRecord();
@@ -285,13 +295,9 @@ function performDomainLookup(string $domain): array
                         $record->setRdata(Factory::Ns($record_value));
                         break;
                     case 'a':
-                        if ($name == "*") $wildcard_a = $record_values;
-                        if (!empty($wildcard_a) && $wildcard_a == $record_values && $name != "*") continue 2;
                         $record->setRdata(Factory::A($record_value));
                         break;
                     case 'cname':
-                        if ($name == "*") $wildcard_cname = $record_value;
-                        if (!empty($wildcard_cname) && $wildcard_cname == $record_value && $name != "*") continue 2;
                         $record->setRdata(Factory::Cname($record_value));
                         break;
                     case 'srv':
@@ -339,7 +345,8 @@ function performDomainLookup(string $domain): array
             $key = strtolower($matches[1]);
             $value = $matches[2];
             if (isset($http_headers[$key])) {
-                $http_headers[$key] = is_array($http_headers[$key]) ? [...$http_headers[$key], $value] : [$http_headers[$key], $value];
+                $http_headers[$key] = is_array($http_headers[$key]) ?
+                    [...$http_headers[$key], $value] : [$http_headers[$key], $value];
             } else {
                 $http_headers[$key] = $value;
             }
