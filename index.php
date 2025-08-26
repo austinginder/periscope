@@ -73,6 +73,9 @@ function rdapLookup(string $domain): array
             if ($event['eventAction'] == 'registration') {
                 $whois[] = ["name" => "Creation Date", "value" => $event['eventDate']];
             }
+            if ($event['eventAction'] == 'expiration') {
+                $whois[] = ["name" => "Expiration Date", "value" => $event['eventDate']];
+            }
             if ($event['eventAction'] == 'last changed') {
                 $whois[] = ["name" => "Updated Date", "value" => $event['eventDate']];
             }
@@ -118,6 +121,9 @@ function parseWhoisText(string $whois_raw): array
         'Domain Name:',
         'Updated Date:',
         'Creation Date:',
+        'Registry Expiry Date:',
+        'Expiry Date:',
+        'Expiration Date:',
         'Registrar IANA ID:',
         'Domain Status:',
         'Reseller:'
