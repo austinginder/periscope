@@ -722,9 +722,13 @@ if (php_sapi_name() === 'cli') {
                     <v-img src="Periscope.webp" max-height="50" max-width="50" contain class="ml-2"></v-img>
                     <v-toolbar-title>Periscope</v-toolbar-title>
                     <v-spacer></v-spacer>
-                    <v-btn icon @click="showHistoryModal = true" class="mr-2 position-relative">
-                        <v-icon>mdi-history</v-icon>
-                    </v-btn>
+                    <v-tooltip location="bottom" :text="historyItems.length > 0 ? `${historyItems.length} items in history` : 'No lookup history'">
+                        <template v-slot:activator="{ props }">
+                            <v-btn v-bind="props" icon @click="openHistory()" class="mr-2 position-relative">
+                                <v-icon>mdi-history</v-icon>
+                            </v-btn>
+                        </template>
+                    </v-tooltip>
                     <v-btn icon @click="toggleTheme()">
                         <v-icon>{{ currentTheme === 'dark' ? 'mdi-white-balance-sunny' : 'mdi-moon-waning-crescent' }}</v-icon>
                     </v-btn>
@@ -1156,7 +1160,10 @@ if (php_sapi_name() === 'cli') {
                             this.dialog.content = data.trim() === '' ? 'No results found.' : data;
                         });
                 },
-                // History methods
+                openHistory() {
+                    this.loadHistory();
+                    this.showHistoryModal = true;
+                },
                 loadHistory() {
                     fetch("?action=get_history")
                         .then(response => response.json())
