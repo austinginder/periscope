@@ -641,624 +641,687 @@ if (php_sapi_name() === 'cli') {
     // The web app continues to render the HTML below
 }
 
-?><!DOCTYPE html>
-<html>
+?>  <!DOCTYPE html>
+<html lang="en" class="h-full">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Periscope</title>
-    <link href="prism.css" rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/vuetify@v3.7.6/dist/vuetify.min.css" rel="stylesheet">
     <link rel="icon" href="Periscope.webp" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, minimal-ui">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        // "Submarine" Palette overrides
+                        slate: {
+                            850: '#1e293b', 
+                            900: '#0f172a', 
+                            950: '#020617', // Deepest ocean
+                        },
+                        cyan: {
+                            400: '#22d3ee', // Radar blip
+                            500: '#06b6d4',
+                            900: '#164e63',
+                        }
+                    },
+                    animation: {
+                        'radar': 'radar 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+                    },
+                    keyframes: {
+                        radar: {
+                            '75%, 100%': { transform: 'scale(2)', opacity: '0' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet">
+
     <style>
-        [v-cloak]>* {
-            display: none;
-        }
-
-        .multiline {
-            white-space: pre-wrap;
-        }
-
-        /* Base Toolbar (light mode default) */
-        .top-toolbar {
-            background: linear-gradient(90deg, #0E7490, #0A3D62);
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            color: #ffffff;
-            box-shadow: 0 2px 12px rgba(10, 61, 98, 0.25);
-            border-radius: 2rem;
-            padding: 0.75rem 1.5rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 1rem auto;
-            max-width: 90%;
-            position: relative;
-            z-index: 1000;
-            border: 1px solid #08263d;
-        }
-
-        .top-toolbar .v-toolbar-title,
-        .top-toolbar a,
-        .top-toolbar .v-icon,
-        .top-toolbar .v-btn {
-        color: #ffffff;
-        }
-
-        .top-toolbar a:hover {
-        color: #E6F7FF;
-        }
-
-        /* 🌙 Dark Mode Styles */
-        .v-theme--dark .top-toolbar {
-            background: linear-gradient(90deg, #0B1E33, #09263F);
-            border: 1px solid rgba(246, 236, 219, 0.25);
-            color: #f6ecdb;
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
-        }
-
-        .v-theme--dark .top-toolbar .v-toolbar-title,
-        .v-theme--dark .top-toolbar a,
-        .v-theme--dark .top-toolbar .v-icon,
-        .v-theme--dark .top-toolbar .v-btn {
-        color: #f6ecdb;
-        }
-
-        .v-theme--dark .top-toolbar a:hover {
-        color: #ffffff;
-        }
-
-        /* --- Prism JS Theme Overrides for DNS Zone --- */
-        pre[class*=language-] {
-            margin: 0 !important;
-        }
+        [v-cloak] { display: none; }
+        .custom-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background-color: rgba(6, 182, 212, 0.2); border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background-color: rgba(6, 182, 212, 0.5); }
     </style>
 </head>
-<body>
-    <div id="app" v-cloak>
-        <v-app :theme="currentTheme">
-            <v-main>
-                <v-toolbar flat dense color="transparent" class="top-toolbar py-0 px-3">
-                    <v-img src="Periscope.webp" max-height="50" max-width="50" contain class="ml-2"></v-img>
-                    <v-toolbar-title>Periscope</v-toolbar-title>
-                    <v-spacer></v-spacer>
-                    <v-tooltip location="bottom" :text="historyItems.length > 0 ? `${historyItems.length} items in history` : 'No lookup history'">
-                        <template v-slot:activator="{ props }">
-                            <v-btn v-bind="props" icon @click="openHistory()" class="mr-2 position-relative">
-                                <v-icon>mdi-history</v-icon>
-                            </v-btn>
-                        </template>
-                    </v-tooltip>
-                    <v-btn icon @click="toggleTheme()">
-                        <v-icon>{{ currentTheme === 'dark' ? 'mdi-white-balance-sunny' : 'mdi-moon-waning-crescent' }}</v-icon>
-                    </v-btn>
-                </v-toolbar>
-                <v-container class="mb-16 pb-16">
-                    <v-text-field autofocus variant="outlined" color="primary" label="Domain" v-model="domain" spellcheck="false" @keydown.enter="lookupDomain()" class="mt-5 mx-auto">
-                        <template v-slot:append-inner>
-                            <v-btn variant="flat" color="primary" @click="lookupDomain()" :loading="loading">
-                                Lookup
-                                <template v-slot:loader><v-progress-circular :size="22" :width="2" :color="currentTheme === 'dark' ? 'black' : 'white'" indeterminate></v-progress-circular></template>
-                            </v-btn>
-                        </template>
-                    </v-text-field>
-                    <v-alert type="warning" v-for="error in response.errors" class="mb-3" v-html="error"></v-alert>
+<body class="h-full bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-200 transition-colors duration-200 selection:bg-cyan-500/30">
 
-                    <v-row v-if="response.domain && response.domain != ''">
-                        <v-col cols="12">
-                            <v-btn v-if="otherVersions.length > 0" @click="showVersionsModal = true" color="primary" variant="tonal" class="mb-4">
-                                <v-icon start>mdi-history</v-icon>
-                                View History ({{ otherVersions.length }} older)
-                            </v-btn>
-                        </v-col>
-                        <v-col md="5" cols="12">
-                            <v-card variant="outlined" color="primary">
-                                <v-btn size="small" @click="showRawWhois()" class="position-absolute right-0 mt-2 mr-4" variant="tonal">
-                                    View raw
-                                </v-btn>
-                                <v-card-title>Domain</v-card-title>
-                                <v-card-text>
-                                    <v-table density="compact">
-                                        <template v-slot:default>
-                                            <thead>
-                                                <tr>
-                                                    <th class="text-left">Name</th>
-                                                    <th class="text-left">Value</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <tr v-for='record in response.domain'>
-                                                    <td>{{ record.name }}</td>
-                                                    <td @contextmenu="showContextMenu($event, record.value)">{{ record.value }}</td>
-                                                </tr>
-                                            </tbody>
-                                        </template>
-                                    </v-table>
-                                </v-card-text>
-                            </v-card>
-                            <v-card class="mt-5" variant="outlined" color="primary">
-                                <v-card-title>IP information</v-card-title>
-                                <v-card-text>
-                                    <template v-for='(rows, ip) in response.ip_lookup'>
-                                        <div class="d-flex justify-space-between align-center mt-3 mb-2">
-                                            <span>Details for {{ ip }}</span>
-                                            <v-btn size="small" @click="runWhois(ip)" variant="tonal">
-                                                View raw
-                                            </v-btn>
-                                        </div>
-                                        <v-table density="compact">
-                                            <template v-slot:default>
-                                                <thead>
-                                                    <tr>
-                                                        <th class="text-left">Name</th>
-                                                        <th class="text-left">Value</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    <tr v-for='row in rows.split("\n")'>
-                                                        <td>{{ row.split( ":" )[0] }}</td>
-                                                        <td @contextmenu="showContextMenu($event, row.split( ':' )[1])">{{ row.split( ":" )[1] }}</td>
-                                                    </tr>
-                                                </tbody>
-                                            </template>
-                                        </v-table>
-                                    </template>
-                                </v-card-text>
-                            </v-card>
-                            <v-card class="mt-5" variant="outlined" color="primary">
-                                <v-card-title>HTTP headers</v-card-title>
-                                <v-card-text>
-                                    <v-table density="compact">
-                                        <template v-slot:default>
-                                            <thead>
-                                                <tr>
-                                                    <th class="text-left" style="min-width: 200px;">Name</th>
-                                                    <th class="text-left">Value</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <tr v-for='(key, value) in response.http_headers'>
-                                                    <td>{{ value }}</td>
-                                                    <td @contextmenu="showContextMenu($event, key)">{{ key }}</td>
-                                                </tr>
-                                            </tbody>
-                                        </template>
-                                    </v-table>
-                                </v-card-text>
-                            </v-card>
-                        </v-col>
+<div id="app" v-cloak class="min-h-full flex flex-col">
 
-                        <v-col md="7" cols="12">
-                            <v-card variant="outlined" color="primary">
-                                <v-card-title>Common DNS records</v-card-title>
-                                <v-card-text>
-                                    <v-table density="compact">
-                                        <template v-slot:default>
-                                            <thead>
-                                                <tr>
-                                                    <th class="text-left">Type</th>
-                                                    <th class="text-left">Name</th>
-                                                    <th class="text-left">Value</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <tr v-for="record in response.dns_records">
-                                                    <td>{{ record.type }}</td>
-                                                    <td>{{ record.name }}</td>
-                                                    <td class="multiline">
-                                                        <template v-if="record.type !== 'mx'">
-                                                            <span @contextmenu="showContextMenu($event, record.value)">{{ record.value }}</span>
-                                                        </template>
-                                                        <template v-else>
-                                                            <div v-for="line in record.value.split('\n').filter(l => l.trim() !== '')" :key="line">
-                                                                {{ line.split(' ')[0] }}&nbsp;<span @contextmenu="showContextMenu($event, line.split(' ')[1])" style="cursor: pointer;">{{ line.split(' ')[1] }}</span>
-                                                            </div>
-                                                        </template>
-                                                    </td>
-                                                </tr>
-                                            </tbody>
-                                        </template>
-                                    </v-table>
-                                </v-card-text>
-                            </v-card>
-                            <v-card class="mt-5" variant="flat">
-                                <v-btn size="small" @click="copyZone()" class="position-absolute right-0 mt-6" style="margin-right: 140px;">
-                                    <v-icon left>mdi-content-copy</v-icon>
-                                </v-btn>
-                                <v-btn size="small" @click="downloadZone()" class="position-absolute right-0 mt-6 mr-4">
-                                    <v-icon left>mdi-download</v-icon>
-                                    Download
-                                </v-btn>
-                                <pre class="language-dns-zone-file text-body-2" style="border-radius:4px;border:0px"><code class="language-dns-zone-file">{{ response.zone }}</code></pre>
-                                <a ref="download_zone" href="#"></a>
-                            </v-card>
-                        </v-col>
-                    </v-row>
-                </v-container>
-                <v-snackbar v-model="snackbar.show" timeout="2000">
-                    {{ snackbar.message }}
-                    <template v-slot:actions>
-                        <v-btn variant="text" @click="snackbar.show = false">
-                            Close
-                        </v-btn>
-                    </template>
-                </v-snackbar>
+    <nav class="sticky top-0 z-40 w-full backdrop-blur-lg bg-white/70 dark:bg-slate-950/70 border-b border-slate-200 dark:border-slate-800/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div @click="resetView()" class="flex items-center gap-3 cursor-pointer group select-none">
+                    <div class="relative">
+                        <img src="Periscope.webp" alt="Logo" class="h-8 w-8 object-contain relative z-10 transition-transform group-hover:rotate-12">
+                        <div class="absolute inset-0 rounded-full bg-cyan-400 opacity-0 group-hover:animate-radar z-0"></div>
+                    </div>
+                    <span class="font-bold text-lg tracking-tight text-slate-900 dark:text-cyan-50 group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">Periscope</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    
+                    <a href="https://github.com/austinginder/periscope" target="_blank" class="relative group p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors">
+                        <span class="mdi mdi-github text-xl"></span>
+                        <span class="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-lg">
+                            GitHub Source
+                        </span>
+                    </a>
 
-                <v-menu v-model="contextMenu.show" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px', position: 'fixed', zIndex: 9999 }">
-                    <v-list dense>
-                        <v-list-item v-if="isDomain(contextMenu.value)" @click="runDig(contextMenu.value)">
-                            <v-list-item-title>Dig {{ contextMenu.value }}</v-list-item-title>
-                        </v-list-item>
-                        <v-list-item v-if="isIp(contextMenu.value)" @click="runWhois(contextMenu.value)">
-                            <v-list-item-title>Whois {{ contextMenu.value }}</v-list-item-title>
-                        </v-list-item>
-                    </v-list>
-                </v-menu>
+                    <button @click="openHistory()" class="relative group p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors">
+                        <span class="mdi mdi-history text-xl"></span>
+                        <span class="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-lg">
+                            Scan History
+                        </span>
+                    </button>
 
-                <v-dialog v-model="dialog.show" max-width="1100">
-                    <v-card>
-                        <v-card-title class="d-flex align-center">
-                            <span class="text-h5">{{ dialog.title }}</span>
-                            <v-spacer></v-spacer>
-                            <v-btn icon="mdi-close" variant="text" @click="dialog.show = false"></v-btn>
-                        </v-card-title>
-                        <v-card-text class="pt-4">
-                            <pre class="language-json text-body-2" style="border-radius:4px;border:0px"><code>{{ dialog.content }}</code></pre>
-                        </v-card-text>
-                    </v-card>
-                </v-dialog>
+                    <button @click="toggleTheme()" class="relative group p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors">
+                        <span class="mdi text-xl" :class="currentTheme === 'dark' ? 'mdi-white-balance-sunny' : 'mdi-moon-waning-crescent'"></span>
+                        <span class="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-lg">
+                            {{ currentTheme === 'dark' ? 'Light Mode' : 'Dark Mode' }}
+                        </span>
+                    </button>
 
-                <v-dialog v-model="showHistoryModal" max-width="600">
-                    <v-card>
-                        <v-card-title class="d-flex align-center">
-                            <span class="text-h5">Recent Lookups</span>
-                            <v-spacer></v-spacer>
-                            <v-tooltip location="bottom" text="Export history to a JSON file">
-                                <template v-slot:activator="{ props }">
-                                    <v-btn v-bind="props" icon="mdi-export-variant" variant="text" @click="exportHistory" :disabled="historyItems.length === 0"></v-btn>
-                                </template>
-                            </v-tooltip>
-                            <v-tooltip location="bottom" text="Import history from a JSON file">
-                                <template v-slot:activator="{ props }">
-                                    <v-btn v-bind="props" icon="mdi-import" variant="text" @click="triggerImport"></v-btn>
-                                </template>
-                            </v-tooltip>
-                            <v-btn icon="mdi-close" variant="text" @click="showHistoryModal = false"></v-btn>
-                        </v-card-title>
-                        <v-card-text>
-                            <input type="file" ref="importFile" @change="importHistory" accept=".json" style="display:none" />
-                            <v-list v-if="historyItems.length > 0">
-                                <v-list-item v-for="(item, index) in historyItems" :key="item.id" @click="loadFromHistory(item)">
-                                    <v-list-item-title>{{ item.domain }}</v-list-item-title>
-                                    <v-list-item-subtitle>{{ formatDate(item.timestamp) }}</v-list-item-subtitle>
-                                </v-list-item>
-                            </v-list>
-                            <div v-else class="text-center py-8">
-                                <v-icon size="64" class="mb-4">mdi-history</v-icon>
-                                <p>No previous lookups found</p>
-                            </div>
-                        </v-card-text>
-                    </v-card>
-                </v-dialog>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <div class="max-w-3xl mx-auto mb-10 transition-all duration-500 relative z-30" :class="{'mt-20 scale-110': !response.domain, 'mt-0': response.domain}">
+            <div class="relative group">
+                <div class="absolute -inset-1 bg-gradient-to-r from-cyan-500 to-sky-600 rounded-lg blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
                 
-                <v-dialog v-model="showVersionsModal" max-width="600">
-                    <v-card>
-                        <v-card-title class="d-flex align-center">
-                            <span class="text-h5">History for {{ domain }}</span>
-                            <v-spacer></v-spacer>
-                            <v-btn icon="mdi-close" variant="text" @click="showVersionsModal = false"></v-btn>
-                        </v-card-title>
-                        <v-card-text>
-                            <v-list>
-                                <v-list-item v-for="(item, index) in domainVersions" :key="item.id" @click="loadFromHistory(item)" :active="item.timestamp === response.timestamp">
-                                    <v-list-item-title>
-                                        <v-icon v-if="item.timestamp === response.timestamp" class="mr-2">mdi-check-circle</v-icon>
-                                        Lookup from {{ formatDate(item.timestamp) }}
-                                        </v-list-item-title>
-                                    <template v-slot:append>
-                                        <v-btn icon variant="text" @click.stop="removeHistoryItem(item, index)">
-                                            <v-icon>mdi-close</v-icon>
-                                        </v-btn>
-                                    </template>
-                                </v-list-item>
-                            </v-list>
-                        </v-card-text>
-                    </v-card>
-                </v-dialog>
+                <div class="relative flex items-center bg-white dark:bg-slate-900 rounded-lg ring-1 ring-slate-900/5 dark:ring-white/10 shadow-xl">
+                    <div class="pl-4 text-slate-400">
+                        <span class="mdi mdi-radar text-2xl"></span>
+                    </div>
+                    
+                    <input 
+                        v-model="domain" 
+                        @keydown.enter="lookupDomain()"
+                        @input="showAutocomplete = true"
+                        @focus="showAutocomplete = true"
+                        @blur="handleBlur"
+                        type="text" 
+                        class="w-full bg-transparent border-0 py-4 px-4 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-0 focus:outline-none sm:text-lg" 
+                        placeholder="Target domain (e.g., google.com)" 
+                        spellcheck="false"
+                        autocomplete="off"
+                        autofocus
+                    >
+                    
+                    <div class="pr-2">
+                        <button 
+                            @click="lookupDomain()" 
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-cyan-600 hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                            :disabled="loading"
+                        >
+                            <svg v-if="loading" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Scan
+                        </button>
+                    </div>
+                </div>
 
-            </v-main>
-        </v-app>
+                <div v-if="showAutocomplete && filteredHistory.length > 0" 
+                     class="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden max-h-60 overflow-y-auto custom-scroll z-50">
+                    <div class="px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50 dark:bg-slate-950/50">
+                        History Suggestions
+                    </div>
+                    <ul>
+                        <li v-for="item in filteredHistory" :key="item.domain" 
+                            @mousedown="selectAutocomplete(item)"
+                            class="px-4 py-3 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 cursor-pointer transition-colors border-b border-slate-100 dark:border-slate-800/50 last:border-0 group">
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-700 dark:text-slate-200 font-medium group-hover:text-cyan-700 dark:group-hover:text-cyan-400">{{ item.domain }}</span>
+                                <span class="text-xs text-slate-400 font-mono">{{ formatDateShort(item.timestamp) }}</span>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div v-if="response.errors.length > 0" class="mt-4 space-y-2">
+                <div v-for="error in response.errors" class="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded-md shadow-sm">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <span class="mdi mdi-alert-circle text-red-500"></span>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm text-red-700 dark:text-red-200" v-html="error"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="response.domain" class="animate-fade-in-up">
+            
+            <div v-if="otherVersions.length > 0" class="mb-6 flex justify-center">
+                <button @click="showVersionsModal = true" class="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-colors border border-cyan-200 dark:border-cyan-800/50">
+                    <span class="mdi mdi-history mr-2"></span>
+                    View History ({{ otherVersions.length }} older scans)
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-6">
+                
+                <div class="md:col-span-5 space-y-6">
+                    
+                    <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-950/30">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">Target Status</h3>
+                            <button @click="showRawWhois()" class="text-xs text-cyan-600 dark:text-cyan-400 hover:underline">View Raw</button>
+                        </div>
+                        <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                            <div v-for="record in response.domain" :key="record.name" class="px-5 py-3 grid grid-cols-3 gap-4 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
+                                <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{{ record.name }}</dt>
+                                <dd class="text-sm text-slate-900 dark:text-slate-200 col-span-2 break-words font-mono" @contextmenu="showContextMenu($event, record.value)">
+                                    {{ record.value }}
+                                </dd>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">Network Coordinates</h3>
+                        </div>
+                        <div class="p-5 space-y-6">
+                            <template v-for="(rows, ip) in response.ip_lookup">
+                                <div class="bg-slate-50 dark:bg-slate-950 rounded-lg p-3 border border-slate-100 dark:border-slate-800">
+                                    <div class="flex justify-between items-center mb-3">
+                                        <div class="flex items-center gap-2">
+                                            <span class="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
+                                            <span class="font-mono text-sm font-bold text-slate-700 dark:text-slate-200">{{ ip }}</span>
+                                        </div>
+                                        <button @click="runWhois(ip)" class="text-xs px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">Raw</button>
+                                    </div>
+                                    <div class="space-y-1">
+                                        <div v-for="row in rows.split('\n')" class="grid grid-cols-3 gap-2 text-xs">
+                                            <span class="text-slate-500 dark:text-slate-400">{{ row.split(":")[0] }}</span>
+                                            <span class="col-span-2 text-slate-800 dark:text-slate-300 font-mono truncate" @contextmenu="showContextMenu($event, row.split(':')[1])">{{ row.split(":")[1] }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">Signature (Headers)</h3>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-slate-100 dark:divide-slate-800">
+                                <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                                    <tr v-for="(value, key) in response.http_headers" class="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                                        <td class="px-5 py-2 text-xs font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">{{ key }}</td>
+                                        <td class="px-5 py-2 text-xs font-mono text-slate-800 dark:text-slate-300 break-all" @contextmenu="showContextMenu($event, value)">{{ value }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="md:col-span-7 space-y-6">
+                    
+                    <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">DNS Records</h3>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
+                                <thead class="bg-slate-50 dark:bg-slate-950/50">
+                                    <tr>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider w-20">Type</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider w-32">Name</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white dark:bg-slate-900 divide-y divide-slate-200 dark:divide-slate-800">
+                                    <tr v-for="record in response.dns_records" class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                                        <td class="px-6 py-3 whitespace-nowrap text-xs font-bold text-slate-600 dark:text-slate-300 uppercase">{{ record.type }}</td>
+                                        <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500 dark:text-slate-400 font-mono">{{ record.name }}</td>
+                                        <td class="px-6 py-3 text-xs text-slate-800 dark:text-slate-300 font-mono break-all">
+                                            <template v-if="record.type !== 'mx'">
+                                                <span @contextmenu="showContextMenu($event, record.value)">{{ record.value }}</span>
+                                            </template>
+                                            <template v-else>
+                                                <div v-for="line in record.value.split('\n').filter(l => l.trim() !== '')" :key="line" class="py-0.5">
+                                                    <span class="text-cyan-600 dark:text-cyan-400 mr-2">{{ line.split(' ')[0] }}</span>
+                                                    <span @contextmenu="showContextMenu($event, line.split(' ')[1])">{{ line.split(' ')[1] }}</span>
+                                                </div>
+                                            </template>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-950 rounded-xl shadow-lg border border-slate-900 overflow-hidden relative group">
+                        <div class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                            <button @click="copyZone()" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md shadow-sm border border-slate-700 transition-colors" title="Copy">
+                                <span class="mdi mdi-content-copy"></span>
+                            </button>
+                            <button @click="downloadZone()" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md shadow-sm border border-slate-700 transition-colors" title="Download">
+                                <span class="mdi mdi-download"></span>
+                            </button>
+                        </div>
+                        <div class="px-5 py-3 bg-black/40 border-b border-slate-900 flex justify-between items-center">
+                            <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">BIND Zone File</h3>
+                        </div>
+                        <div class="p-0 overflow-x-auto custom-scroll bg-[#0b1016]">
+                             <pre class="language-dns-zone-file !m-0 !bg-transparent !p-4 !text-sm"><code class="language-dns-zone-file">{{ response.zone }}</code></pre>
+                        </div>
+                        <a ref="download_zone" href="#" class="hidden"></a>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <div v-if="!response.domain" class="mt-20 text-center">
+             <div class="text-slate-400 dark:text-slate-600 text-sm flex flex-col items-center gap-2">
+                 <span class="mdi mdi-submarine text-4xl opacity-50"></span>
+                 <p>Waiting for target coordinates...</p>
+             </div>
+        </div>
+
+    </main>
+
+    <div v-if="contextMenu.show" 
+         class="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-1 z-50 w-48 animate-scale-in"
+         :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
+         @mouseleave="contextMenu.show = false">
+         
+         <div v-if="isDomain(contextMenu.value)" @click="runDig(contextMenu.value)" class="px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-cyan-50 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-2">
+            <span class="mdi mdi-dns w-4"></span> Dig {{ contextMenu.value }}
+         </div>
+         <div v-if="isIp(contextMenu.value)" @click="runWhois(contextMenu.value)" class="px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-cyan-50 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-2">
+            <span class="mdi mdi-card-account-details w-4"></span> Whois {{ contextMenu.value }}
+         </div>
+         <div @click="copyToClipboard(contextMenu.value)" class="px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-cyan-50 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-2 border-t border-slate-100 dark:border-slate-700 mt-1">
+            <span class="mdi mdi-content-copy w-4"></span> Copy Value
+         </div>
     </div>
-    <script src="prism.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/vue@v3.5.19/dist/vue.global.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/vuetify@v3.9.5/dist/vuetify.min.js"></script>
-    <script>
-        const {
-            createApp,
-            computed
-        } = Vue;
-        const {
-            createVuetify
-        } = Vuetify;
-        const vuetify = createVuetify({
-            theme: {
-                themes: {
-                    light: {
-                        dark: false,
-                        colors: {
-                            background: '#F8F9F9', // Sail White
-                            primary: '#09263f', // New Primary Color
-                            secondary: '#001F3F', // Deep Navy
-                            error: '#FF4136', // Signal Red
-                            info: '#F5DEB3' // Rope Beige
-                        }
-                    },
-                    dark: {
-                        dark: true,
-                        colors: {
-                            background: '#000000ff', // Deep Navy
-                            primary: '#f6ecdb', // New
-                            secondary: '#F5DEB3', // Rope Beige
-                            error: '#FF4136', // Signal Red
-                            info: '#F8F9F9' // Sail White
-                        }
-                    }
-                }
+
+    <div v-if="dialog.show" class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-slate-900/75 transition-opacity" @click="dialog.show = false"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full border border-slate-200 dark:border-slate-800">
+                <div class="px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg leading-6 font-medium text-slate-900 dark:text-white" id="modal-title">{{ dialog.title }}</h3>
+                        <button @click="dialog.show = false" class="text-slate-400 hover:text-slate-500 dark:hover:text-slate-300">
+                            <span class="mdi mdi-close text-xl"></span>
+                        </button>
+                    </div>
+                    <div class="bg-black/50 rounded-lg p-4 overflow-auto max-h-[70vh] custom-scroll border border-slate-800">
+                        <pre class="text-xs sm:text-sm text-cyan-50 font-mono whitespace-pre-wrap">{{ dialog.content }}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="showHistoryModal" class="fixed inset-0 z-50 overflow-y-auto">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-slate-900/75 transition-opacity" @click="showHistoryModal = false"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
+            <div class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-xl sm:w-full border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-950">
+                    <h3 class="text-lg font-medium text-slate-900 dark:text-white">Scan Log</h3>
+                    <div class="flex gap-2">
+                        <button @click="exportHistory" :disabled="historyItems.length === 0" class="p-2 text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400 disabled:opacity-30">
+                            <span class="mdi mdi-export-variant"></span>
+                        </button>
+                        <button @click="triggerImport" class="p-2 text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400">
+                            <span class="mdi mdi-import"></span>
+                        </button>
+                        <button @click="showHistoryModal = false" class="p-2 text-slate-500 hover:text-slate-700">
+                            <span class="mdi mdi-close"></span>
+                        </button>
+                    </div>
+                </div>
+                <div class="max-h-[60vh] overflow-y-auto custom-scroll">
+                    <input type="file" ref="importFile" @change="importHistory" accept=".json" class="hidden" />
+                    <ul v-if="historyItems.length > 0" class="divide-y divide-slate-200 dark:divide-slate-800">
+                        <li v-for="item in historyItems" :key="item.id" @click="loadFromHistory(item)" class="px-6 py-4 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors group">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <p class="text-sm font-medium text-cyan-600 dark:text-cyan-400">{{ item.domain }}</p>
+                                    <p class="text-xs text-slate-500 dark:text-slate-400">{{ formatDate(item.timestamp) }}</p>
+                                </div>
+                                <span class="mdi mdi-chevron-right text-slate-300 group-hover:text-slate-500"></span>
+                            </div>
+                        </li>
+                    </ul>
+                    <div v-else class="text-center py-12">
+                        <span class="mdi mdi-history text-5xl text-slate-200 dark:text-slate-700"></span>
+                        <p class="mt-2 text-slate-500">Log empty</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="showVersionsModal" class="fixed inset-0 z-50 overflow-y-auto">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-slate-900/75 transition-opacity" @click="showVersionsModal = false"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
+            <div class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-xl sm:w-full border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-950">
+                    <h3 class="text-lg font-medium text-slate-900 dark:text-white">Snapshots: {{ domain }}</h3>
+                    <button @click="showVersionsModal = false" class="text-slate-400 hover:text-slate-500"><span class="mdi mdi-close"></span></button>
+                </div>
+                <ul class="divide-y divide-slate-200 dark:divide-slate-800 max-h-[60vh] overflow-y-auto custom-scroll">
+                    <li v-for="(item, index) in domainVersions" :key="item.id" @click="loadFromHistory(item)" 
+                        class="px-6 py-4 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors flex justify-between items-center"
+                        :class="{'bg-cyan-50 dark:bg-cyan-900/20': item.timestamp === response.timestamp}">
+                        <div class="flex items-center gap-3">
+                             <span v-if="item.timestamp === response.timestamp" class="mdi mdi-check-circle text-cyan-500"></span>
+                             <span v-else class="mdi mdi-clock-outline text-slate-400"></span>
+                             <div>
+                                 <p class="text-sm font-medium text-slate-900 dark:text-slate-200">{{ formatDate(item.timestamp) }}</p>
+                             </div>
+                        </div>
+                        <button @click.stop="removeHistoryItem(item, index)" class="p-1 text-slate-400 hover:text-red-500 transition-colors">
+                            <span class="mdi mdi-trash-can-outline"></span>
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="snackbar.show" class="fixed bottom-4 right-4 z-50 animate-slide-in-right">
+        <div class="bg-slate-800 dark:bg-cyan-500 text-white dark:text-slate-900 px-6 py-3 rounded-lg shadow-lg flex items-center gap-4 font-medium">
+            <span>{{ snackbar.message }}</span>
+            <button @click="snackbar.show = false" class="text-sm font-bold opacity-75 hover:opacity-100">DISMISS</button>
+        </div>
+    </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-dns-zone-file.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@v3.5.19/dist/vue.global.js"></script>
+
+<script>
+    const { createApp } = Vue;
+
+    createApp({
+        data() {
+            return {
+                domain: "",
+                loading: false,
+                snackbar: { show: false, message: "" },
+                response: { domain: "", errors: [], zone: "", timestamp: null },
+                currentTheme: localStorage.getItem('theme') || 'dark',
+                contextMenu: { show: false, x: 0, y: 0, value: '' },
+                dialog: { show: false, title: '', content: '' },
+                showHistoryModal: false,
+                historyItems: [],
+                showVersionsModal: false,
+                domainVersions: [],
+                showAutocomplete: false
             }
-        });
-        createApp({
-            data() {
-                return {
-                    domain: "",
-                    loading: false,
-                    snackbar: {
-                        show: false,
-                        message: ""
-                    },
-                    response: {
-                        domain: "",
-                        errors: [],
-                        zone: "",
-                        timestamp: null
-                    },
-                    currentTheme: localStorage.getItem('theme') || 'light',
-                    contextMenu: {
-                        show: false,
-                        x: 0,
-                        y: 0,
-                        value: ''
-                    },
-                    dialog: {
-                        show: false,
-                        title: '',
-                        content: ''
-                    },
-                    showHistoryModal: false,
-                    historyItems: [],
-                    showVersionsModal: false,
-                    domainVersions: []
-                }
+        },
+        computed: {
+            otherVersions() {
+                if (!this.response.timestamp) return [];
+                return this.domainVersions.filter(v => v.timestamp !== this.response.timestamp);
             },
-            computed: {
-                otherVersions() {
-                    if (!this.response.timestamp) return [];
-                    return this.domainVersions.filter(v => v.timestamp !== this.response.timestamp);
-                }
-            },
-            methods: {
-                lookupDomain() {
-                    this.loading = true;
-                    // Reset the response object to clear the old data
-                    this.response = {
-                        domain: "",
-                        errors: [],
-                        zone: "",
-                        timestamp: null
-                    };
-                    this.domain = this.extractHostname(this.domain)
-                    fetch("?domain=" + this.domain)
-                        .then(response => response.json())
-                        .then(data => {
-                            this.loading = false
-                            this.response = data
-                            this.loadHistory() // Refresh main history list
-                            this.getDomainVersions(this.domain); // Get all versions for this domain
-                        })
-                        .then(done => {
-                            Prism.highlightAll()
-                        })
-                        .catch(error => {
-                            this.loading = false;
-                            this.response.errors.push("An error occurred while fetching data. Please try again.");
-                            console.error("Fetch Error:", error);
-                        });
-                },
-                extractHostname(url) {
-                    var hostname;
-                    if (url.indexOf("//") > -1) {
-                        hostname = url.split('/')[2];
-                    } else {
-                        hostname = url.split('/')[0];
+            filteredHistory() {
+                if (!this.domain || this.domain.length < 1) return [];
+                
+                // Create unique list based on domain name
+                const unique = [];
+                const seen = new Set();
+                
+                // Sort by timestamp desc first so we get the latest entry for each unique domain
+                const sortedHistory = [...this.historyItems].sort((a, b) => b.timestamp - a.timestamp);
+                
+                for (const item of sortedHistory) {
+                    if (item.domain.toLowerCase().includes(this.domain.toLowerCase()) && !seen.has(item.domain)) {
+                        unique.push(item);
+                        seen.add(item.domain);
                     }
-                    hostname = hostname.split(':')[0];
-                    hostname = hostname.split('?')[0];
-                    return hostname;
-                },
-                downloadZone() {
-                    newBlob = new Blob([this.response.zone], {
-                        type: "text/dns"
+                    if (unique.length >= 8) break; // Limit suggestions
+                }
+                return unique;
+            }
+        },
+        methods: {
+            resetView() {
+                this.response = { domain: "", errors: [], zone: "", timestamp: null };
+                this.domain = "";
+                this.domainVersions = [];
+            },
+            handleBlur() {
+                // Delay hiding to allow click event to register on the list item
+                setTimeout(() => {
+                    this.showAutocomplete = false;
+                }, 200);
+            },
+            selectAutocomplete(item) {
+                this.loadFromHistory(item);
+                this.showAutocomplete = false;
+            },
+            lookupDomain() {
+                if(!this.domain) return;
+                this.loading = true;
+                this.showAutocomplete = false;
+                this.response = { domain: "", errors: [], zone: "", timestamp: null };
+                
+                // Clean input
+                let cleanDomain = this.domain;
+                if (cleanDomain.indexOf("//") > -1) cleanDomain = cleanDomain.split('/')[2];
+                else cleanDomain = cleanDomain.split('/')[0];
+                cleanDomain = cleanDomain.split(':')[0].split('?')[0];
+                this.domain = cleanDomain;
+
+                fetch("?domain=" + this.domain)
+                    .then(response => response.json())
+                    .then(data => {
+                        this.loading = false
+                        this.response = data
+                        this.loadHistory()
+                        this.getDomainVersions(this.domain);
+                        this.$nextTick(() => { Prism.highlightAll() })
                     })
-                    this.$refs.download_zone.download = `${this.domain}.zone`;
-                    this.$refs.download_zone.href = window.URL.createObjectURL(newBlob);
-                    this.$refs.download_zone.click();
-                },
-                copyZone() {
-                    navigator.clipboard.writeText(this.response.zone)
-                    this.snackbar.message = "Zone copied to clipboard"
-                    this.snackbar.show = true
-                },
-                toggleTheme() {
-                    this.currentTheme = this.currentTheme === 'light' ?
-                        'dark' : 'light';
-                    localStorage.setItem('theme', this.currentTheme);
-                },
-                isDomain(str) {
-                    if (typeof str !== 'string' || str.trim() === '') return false;
-                    const cleanedStr = str.trim().split('\n')[0].trim();
-                    const domainRegex = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\.?$/;
-                    return domainRegex.test(cleanedStr) && !this.isIp(cleanedStr);
-                },
-                isIp(str) {
-                    if (typeof str !== 'string' || str.trim() === '') return false;
-                    const cleanedStr = str.trim().split('\n')[0].trim();
-                    const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-                    return ipRegex.test(cleanedStr);
-                },
-                showContextMenu(event, value) {
-                    const cleanedValue = typeof value === 'string' ?
-                        value.trim() : '';
-                    if (!this.isDomain(cleanedValue) && !this.isIp(cleanedValue)) {
-                        return;
-                    }
-                    event.preventDefault();
-                    this.contextMenu.show = false;
-                    this.contextMenu.x = event.clientX;
-                    this.contextMenu.y = event.clientY;
-                    this.contextMenu.value = cleanedValue.split('\n')[0].trim();
-                    this.$nextTick(() => {
-                        this.contextMenu.show = true;
+                    .catch(error => {
+                        this.loading = false;
+                        this.response.errors.push("Connection failed. Check console.");
+                        console.error(error);
                     });
-                },
-                runDig(domain) {
-                    this.dialog.title = `Dig results for: ${domain}`;
-                    this.dialog.content = 'Loading...';
-                    this.dialog.show = true;
-                    fetch(`?dig=${encodeURIComponent(domain)}`)
-                        .then(response => response.text())
-                        .then(data => {
-                            this.dialog.content = data.trim() === '' ? 'No results found.' : data;
-                        });
-                },
-                runWhois(ip) {
-                    this.dialog.title = `whois ${ip}`;
-                    this.dialog.content = 'Loading...';
-                    this.dialog.show = true;
-                    fetch(`?whois=${encodeURIComponent(ip)}`)
-                        .then(response => response.text())
-                        .then(data => {
-                            this.dialog.content = data.trim() === '' ? 'No results found.' : data;
-                            Prism.highlightAll();
-                        });
-                },
-                showRawWhois() {
-                    this.dialog.title = `Raw response for: ${this.domain}`;
-                    this.dialog.content = 'Loading...';
-                    this.dialog.show = true;
-                    fetch(`?raw_domain=${encodeURIComponent(this.domain)}`)
-                        .then(response => response.text())
-                        .then(data => {
-                            this.dialog.content = data.trim() === '' ? 'No results found.' : data;
-                        });
-                },
-                openHistory() {
-                    this.loadHistory();
-                    this.showHistoryModal = true;
-                },
-                loadHistory() {
-                    fetch("?action=get_history")
-                        .then(response => response.json())
-                        .then(data => {
-                            this.historyItems = data;
-                        });
-                },
-                getDomainVersions(domain) {
-                    fetch(`?action=get_domain_versions&domain=${domain}`)
-                        .then(response => response.json())
-                        .then(data => {
-                            this.domainVersions = data;
-                        });
-                },
-                loadFromHistory(item) {
-                    fetch(`?action=get_history_item&id=${item.id}`)
-                        .then(response => response.json())
-                        .then(data => {
-                            this.domain = item.domain;
-                            this.response = data;
-                            this.showHistoryModal = false;
-                            this.showVersionsModal = false;
-                            this.snackbar.message = `Loaded results for ${item.domain} from ${this.formatDate(data.timestamp)}`;
-                            this.snackbar.show = true;
-                            this.getDomainVersions(item.domain); // Refresh the versions list for the new context
-                            this.$nextTick(() => {
-                                Prism.highlightAll();
-                            });
-                        });
-                },
-                removeHistoryItem(item, index) {
-                    const formData = new FormData();
-                    formData.append('id', item.id);
-
-                    fetch('?action=delete_history', {
-                            method: 'POST',
-                            body: formData
-                        })
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.success) {
-                                this.domainVersions.splice(index, 1);
-                                this.loadHistory(); // Reload main history in case the deleted item was the most recent
-                                // If the currently viewed item is the one deleted, clear the view
-                                if (this.response.timestamp === item.timestamp) {
-                                    this.response.domain = ""; // Clear the main view
-                                }
-                            }
-                        });
-                },
-                formatDate(timestamp) {
-                    return new Date(timestamp * 1000).toLocaleString();
-                },
-                exportHistory() {
-                    window.location.href = '?action=export_history';
-                },
-                triggerImport() {
-                    this.$refs.importFile.click();
-                },
-                importHistory(event) {
-                    const file = event.target.files[0];
-                    if (!file) return;
-
-                    const formData = new FormData();
-                    formData.append('importFile', file);
-                    formData.append('action', 'import_history');
-
-                    fetch('', {
-                            method: 'POST',
-                            body: formData
-                        })
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.success) {
-                                this.snackbar.message = `Successfully imported ${data.count} items.`;
-                                this.loadHistory();
-                            } else {
-                                throw new Error(data.message || "Unknown error");
-                            }
-                            this.snackbar.show = true;
-                        })
-                        .catch(error => {
-                            this.snackbar.message = "Failed to import history: " + error.message;
-                            this.snackbar.show = true;
-                        })
-                        .finally(() => {
-                            event.target.value = '';
-                        });
+            },
+            copyZone() {
+                navigator.clipboard.writeText(this.response.zone)
+                this.showToast("Zone copied to clipboard");
+            },
+            copyToClipboard(text) {
+                navigator.clipboard.writeText(text);
+                this.contextMenu.show = false;
+                this.showToast("Copied to clipboard");
+            },
+            showToast(msg) {
+                this.snackbar.message = msg;
+                this.snackbar.show = true;
+                setTimeout(() => { this.snackbar.show = false }, 3000);
+            },
+            downloadZone() {
+                const blob = new Blob([this.response.zone], { type: "text/dns" })
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${this.domain}.zone`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+            },
+            toggleTheme() {
+                this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
+                localStorage.setItem('theme', this.currentTheme);
+                this.applyTheme();
+            },
+            applyTheme() {
+                if (this.currentTheme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
                 }
             },
-            mounted() {
-                document.documentElement.setAttribute('data-theme', this.currentTheme);
+            isDomain(str) {
+                if (typeof str !== 'string' || str.trim() === '') return false;
+                const cleanedStr = str.trim().split('\n')[0].trim();
+                const domainRegex = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\.?$/;
+                return domainRegex.test(cleanedStr) && !this.isIp(cleanedStr);
+            },
+            isIp(str) {
+                if (typeof str !== 'string' || str.trim() === '') return false;
+                const cleanedStr = str.trim().split('\n')[0].trim();
+                const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+                return ipRegex.test(cleanedStr);
+            },
+            showContextMenu(event, value) {
+                const cleanedValue = typeof value === 'string' ? value.trim() : '';
+                event.preventDefault();
+                this.contextMenu.show = false;
+                this.contextMenu.x = event.clientX;
+                this.contextMenu.y = event.clientY;
+                this.contextMenu.value = cleanedValue.split('\n')[0].trim();
+                
+                this.$nextTick(() => {
+                    const menuWidth = 192; // approximate width (w-48)
+                    if (this.contextMenu.x + menuWidth > window.innerWidth) {
+                        this.contextMenu.x = window.innerWidth - menuWidth - 10;
+                    }
+                    this.contextMenu.show = true;
+                });
+            },
+            runDig(domain) {
+                this.dialog.title = `Dig: ${domain}`;
+                this.dialog.content = 'Loading...';
+                this.dialog.show = true;
+                this.contextMenu.show = false;
+                fetch(`?dig=${encodeURIComponent(domain)}`)
+                    .then(r => r.text())
+                    .then(data => this.dialog.content = data || 'No results.');
+            },
+            runWhois(ip) {
+                this.dialog.title = `Whois: ${ip}`;
+                this.dialog.content = 'Loading...';
+                this.dialog.show = true;
+                this.contextMenu.show = false;
+                fetch(`?whois=${encodeURIComponent(ip)}`)
+                    .then(r => r.text())
+                    .then(data => this.dialog.content = data || 'No results.');
+            },
+            showRawWhois() {
+                this.dialog.title = `Raw JSON: ${this.domain}`;
+                this.dialog.content = 'Loading...';
+                this.dialog.show = true;
+                fetch(`?raw_domain=${encodeURIComponent(this.domain)}`)
+                    .then(r => r.text())
+                    .then(data => this.dialog.content = data || 'No results.');
+            },
+            openHistory() {
                 this.loadHistory();
+                this.showHistoryModal = true;
+            },
+            loadHistory() {
+                fetch("?action=get_history").then(r => r.json()).then(data => this.historyItems = data);
+            },
+            getDomainVersions(domain) {
+                fetch(`?action=get_domain_versions&domain=${domain}`).then(r => r.json()).then(data => this.domainVersions = data);
+            },
+            loadFromHistory(item) {
+                fetch(`?action=get_history_item&id=${item.id}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        this.domain = item.domain;
+                        this.response = data;
+                        this.showHistoryModal = false;
+                        this.showVersionsModal = false;
+                        this.showToast(`Loaded ${item.domain} (${this.formatDate(data.timestamp)})`);
+                        this.getDomainVersions(item.domain);
+                        this.$nextTick(() => Prism.highlightAll());
+                    });
+            },
+            removeHistoryItem(item, index) {
+                const fd = new FormData();
+                fd.append('id', item.id);
+                fetch('?action=delete_history', { method: 'POST', body: fd })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            this.domainVersions.splice(index, 1);
+                            this.loadHistory();
+                            if (this.response.timestamp === item.timestamp) this.response = { domain: "", errors: [], zone: "", timestamp: null };
+                        }
+                    });
+            },
+            formatDate(ts) {
+                return new Date(ts * 1000).toLocaleString();
+            },
+            formatDateShort(ts) {
+                return new Date(ts * 1000).toLocaleDateString();
+            },
+            exportHistory() {
+                window.location.href = '?action=export_history';
+            },
+            triggerImport() {
+                this.$refs.importFile.click();
+            },
+            importHistory(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                const fd = new FormData();
+                fd.append('importFile', file);
+                fd.append('action', 'import_history');
+                fetch('', { method: 'POST', body: fd })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            this.showToast(`Imported ${data.count} items`);
+                            this.loadHistory();
+                        } else this.showToast('Import failed');
+                    })
+                    .catch(e => this.showToast('Error importing file'))
+                    .finally(() => e.target.value = '');
             }
-        }).use(vuetify).mount('#app');
-    </script>
+        },
+        mounted() {
+            this.applyTheme();
+            this.loadHistory();
+        }
+    }).mount('#app');
+</script>
 </body>
 </html>
