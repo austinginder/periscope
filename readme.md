@@ -61,4 +61,8 @@ Full report saved to database.
 ```
 
 
-![](screenshot.webp)
+![](screenshot-1.webp)
+
+![](screenshot-2.webp)
+
+![](screenshot-3.webp)
