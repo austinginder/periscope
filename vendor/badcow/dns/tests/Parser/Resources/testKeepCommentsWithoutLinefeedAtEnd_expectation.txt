@@ -1,3 +1,0 @@
-$ORIGIN example.com.
-$TTL 3600
-sub.domain A 192.168.1.42;This is a local ip.

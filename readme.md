@@ -1,68 +1,87 @@
-# Periscope
+# Periscope 🔭
 
-Peer into any domain.
+**Peer into any domain.**
 
-A single-file `.php` script to fetch domain information from `whois` and `dig`. It supports exporting discovered records as a DNS zone file.
-
-## Requirements
-
-  - PHP
-  - `shell_exec` enabled
-  - The following command-line tools: `whois`, `dig`, `host`, `curl`
-
-## Running Locally
-
-You can run this on a local machine or any web server that supports PHP and `shell_exec`.
-
-```bash
-# Clone the repository
-git clone https://github.com/austinginder/periscope.git
-
-# Navigate into the directory
-cd periscope
-
-# Start the local PHP server
-php -S localhost:8000
-```
-
-Then open http://localhost:8000 in your browser
-
-### 🏝️ Using [Cove](https://cove.run) to run Periscope
-
-You will need to have Cove installed and running: https://cove.run. Periscope is a simple PHP app so it can be added to Cove by running the following commands:
-
-```bash
-cove add periscope --plain
-cd $(cove path periscope)
-git clone https://github.com/austinginder/periscope.git .
-```
-
-Then open https://periscope.localhost in your browser.
-
-### Using from the CLI
-
-It's also possible to use from the CLI for scripting purposes by running `php index.php "domain.tld"` as shown in the following example.
-
-```
-php index.php "austinginder.com"
-```
-The response would be:
-```
-Looking up domain: austinginder.com...
-
---- Summary for austinginder.com ---
-Registrar:     Spaceship, Inc.
-IP Addresses:  162.159.135.42
-Name Servers:  ns1.anchor.host., ns2.anchor.host., ns3.anchor.host., ns4.anchor.host.
----------------------------
-
-Full report saved to database.
-
-```
-
+Periscope is a sophisticated DNS and Network diagnostic tool. It combines a beautiful web interface (`https://periscope.run`) with a **Local Bridge** running on your machine. This allows the web UI to securely execute local system tools like `dig`, `whois`, and `curl` to gather deep intelligence on domains without rate limits or proxy restrictions.
 
 ![](screenshot-1.webp)
 
-![](screenshot-2.webp)
+## 🚀 Quick Start
 
-![](screenshot-3.webp)
+To start Periscope, simply run the bootstrapper. This will set up the environment, start the local bridge, and open the interface in your browser.
+
+```bash
+curl -sL https://periscope.run/boot.sh | bash
+```
+
+*This command installs necessary dependencies (PHP, dig, whois) if missing, sets up the local API engine, and connects it to the web UI.*
+
+## ✨ Features
+
+*   **Deep DNS Scanning:** Checks A, MX, NS, SOA, TXT, SRV, and CNAME records.
+*   **Intelligent Analysis:** Automatically flattens CNAME chains and detects modern email security standards (MTA-STS, BIMI, DKIM).
+*   **Zone File Generation:** Exports discovered records into a valid BIND Zone file.
+*   **Network Coordinates:** Resolves IP addresses to their hosting providers/organizations.
+*   **History & Snapshots:** Saves every lookup to a local SQLite database. Compare current DNS states against previous versions.
+*   **CLI Mode:** Run quick diagnostics directly from your terminal.
+
+## 🛠️ How it Works
+
+Periscope uses a **Local Bridge** architecture:
+
+1.  **The Interface:** Hosted at `https://periscope.run`. It provides the visualization and user experience.
+2.  **The Engine:** A lightweight PHP script running locally on your machine (default port `8989`).
+3.  **The Connection:** The Interface sends requests to `http://127.0.0.1:8989`. The Engine executes system commands (`dig`, `whois`) and returns structured JSON.
+
+**Data Privacy:** All history and scan data are stored locally in `~/.periscope/history.db`. No scan data is sent to external servers.
+
+## 📦 Manual Installation & Requirements
+
+If you prefer not to use the auto-bootstrapper, you can run Periscope manually.
+
+### Requirements
+*   **OS:** macOS, Linux, or Windows (via WSL).
+*   **PHP:** 8.0+ (with `php-curl`, `php-sqlite3`, `php-cli`).
+*   **Tools:** `dig` (dnsutils/bind), `whois`, `curl`, `unzip`.
+
+### Running from Source
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/austinginder/periscope.git
+cd periscope
+
+# 2. Run the boot script
+./boot.sh
+```
+
+## 💻 CLI Usage
+
+Once installed, you can use the underlying engine directly from your terminal for quick, headless scans.
+
+```bash
+# Standard lookup
+php ~/.periscope/engine.php google.com
+
+# Output
+# Looking up domain: google.com...
+# --- Summary for google.com ---
+# Registrar:     MarkMonitor, Inc.
+# IP Addresses:  142.250.190.46
+# ---------------------------
+# Full report saved to local database.
+```
+
+## 📸 Screenshots
+
+| Domain Overview | DNS Records |
+| :---: | :---: |
+| ![](screenshot-2.webp) | ![](screenshot-3.webp) |
+
+## 🤝 Contributing
+
+Periscope is open source. Pull requests are welcome for new DNS record types, UI improvements, or better OS compatibility for the bootstrapper.
+
+## License
+
+MIT

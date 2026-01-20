@@ -1,6 +1,0 @@
-*.sublime*
-vendor
-test.php
-composer.lock
-phpunit.xml
-.phpunit.result.cache
