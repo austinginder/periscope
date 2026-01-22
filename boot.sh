@@ -135,7 +135,7 @@ error_reporting(E_ERROR | E_PARSE);
 ini_set('display_errors', '0');
 
 // --- PLUGIN VERSION ---
-define('PERISCOPE_VERSION', '1.1');
+define('PERISCOPE_VERSION', '1.2');
 
 // --- AUTOLOADER ---
 spl_autoload_register(function ($class) {
@@ -182,12 +182,98 @@ function formatDate($raw) {
     } catch (Exception $e) { return $raw; }
 }
 
+// --- INPUT NORMALIZATION ---
+function normalizeInput($input) {
+    // Strip protocol (http://, https://)
+    $input = preg_replace('#^https?://#i', '', $input);
+    // Strip path, query string, fragment (escape # inside char class since # is delimiter)
+    $input = preg_replace('#[/?\#].*$#', '', $input);
+    // Strip trailing dots and whitespace
+    $input = trim($input, ". \t\n\r");
+    // Lowercase
+    return strtolower($input);
+}
+
+function extractRootDomain($host) {
+    // List of multi-part TLDs (add more as needed)
+    $multiPartTlds = [
+        'co.uk', 'org.uk', 'me.uk', 'ac.uk', 'gov.uk', 'net.uk', 'sch.uk',
+        'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'asn.au', 'id.au',
+        'co.nz', 'net.nz', 'org.nz', 'govt.nz', 'ac.nz', 'school.nz',
+        'co.za', 'org.za', 'web.za', 'net.za', 'gov.za',
+        'com.br', 'net.br', 'org.br', 'gov.br', 'edu.br',
+        'co.jp', 'or.jp', 'ne.jp', 'ac.jp', 'go.jp',
+        'co.kr', 'or.kr', 'ne.kr', 'go.kr', 're.kr',
+        'com.cn', 'net.cn', 'org.cn', 'gov.cn', 'edu.cn',
+        'com.tw', 'net.tw', 'org.tw', 'gov.tw', 'edu.tw',
+        'com.hk', 'net.hk', 'org.hk', 'gov.hk', 'edu.hk',
+        'com.sg', 'net.sg', 'org.sg', 'gov.sg', 'edu.sg',
+        'co.in', 'net.in', 'org.in', 'gov.in', 'ac.in', 'res.in',
+        'com.mx', 'net.mx', 'org.mx', 'gob.mx', 'edu.mx',
+        'com.ar', 'net.ar', 'org.ar', 'gov.ar', 'edu.ar',
+        'co.il', 'org.il', 'net.il', 'ac.il', 'gov.il',
+        'com.tr', 'net.tr', 'org.tr', 'gov.tr', 'edu.tr',
+        'com.pl', 'net.pl', 'org.pl', 'gov.pl', 'edu.pl',
+        'co.id', 'or.id', 'web.id', 'ac.id', 'go.id',
+        'com.my', 'net.my', 'org.my', 'gov.my', 'edu.my',
+        'com.ph', 'net.ph', 'org.ph', 'gov.ph', 'edu.ph',
+        'com.vn', 'net.vn', 'org.vn', 'gov.vn', 'edu.vn',
+        'co.th', 'or.th', 'ac.th', 'go.th', 'in.th',
+        'com.ua', 'net.ua', 'org.ua', 'gov.ua', 'edu.ua',
+        'com.ru', 'net.ru', 'org.ru', 'gov.ru', 'edu.ru',
+        'com.de', 'org.de',
+        'co.at', 'or.at', 'ac.at',
+        'com.es', 'org.es', 'nom.es', 'gob.es', 'edu.es',
+        'com.pt', 'org.pt', 'gov.pt', 'edu.pt',
+        'co.it', 'org.it', 'gov.it', 'edu.it',
+        'co.fr', 'asso.fr', 'nom.fr', 'gouv.fr',
+        'co.nl', 'org.nl',
+        'co.be', 'org.be',
+        'eu.com', 'us.com', 'gb.com', 'uk.com', 'de.com', 'jpn.com', 'kr.com', 'cn.com',
+        'eu.org', 'us.org',
+    ];
+
+    $parts = explode('.', $host);
+    $numParts = count($parts);
+
+    if ($numParts <= 2) {
+        return $host; // Already a root domain
+    }
+
+    // Check for multi-part TLDs
+    $lastTwo = $parts[$numParts - 2] . '.' . $parts[$numParts - 1];
+    if (in_array($lastTwo, $multiPartTlds)) {
+        // Root is last 3 parts (e.g., example.co.uk)
+        if ($numParts >= 3) {
+            return $parts[$numParts - 3] . '.' . $lastTwo;
+        }
+        return $host;
+    }
+
+    // Standard TLD - root is last 2 parts (e.g., example.com)
+    return $parts[$numParts - 2] . '.' . $parts[$numParts - 1];
+}
+
+function isSubdomain($host) {
+    $root = extractRootDomain($host);
+    return $host !== $root;
+}
+
 // --- RAW FILE STORAGE ---
 function getScanPath($domain, $timestamp) {
+    // SAFETY: Reject empty or suspicious domain values
+    if (empty($domain) || $domain === '.' || $domain === '..' || strpos($domain, '/') !== false) {
+        throw new Exception('Invalid domain for scan path');
+    }
     return getenv('HOME') . "/.periscope/scans/$domain/$timestamp";
 }
 
-function saveRawFiles($path, $html, $headers, $whoisDomain, $whoisIps, $ssl, $dns, $rdap = null) {
+function saveRawFiles($path, $html, $headers, $whoisDomain, $whoisIps, $ssl, $dns, $rdap = null, $metadata_files = []) {
+    // SAFETY: Ensure path is within expected directory
+    $expectedBase = getenv('HOME') . "/.periscope/scans/";
+    if (empty($path) || strpos(realpath(dirname($path)) ?: $path, $expectedBase) !== 0) {
+        return; // Silently abort if path is suspicious
+    }
     if (!is_dir($path)) mkdir($path, 0755, true);
     if ($html) file_put_contents("$path/html.txt", $html);
     if ($headers) file_put_contents("$path/headers.json", json_encode($headers));
@@ -198,6 +284,68 @@ function saveRawFiles($path, $html, $headers, $whoisDomain, $whoisIps, $ssl, $dn
     if ($ssl) file_put_contents("$path/ssl.txt", $ssl);
     if ($dns) file_put_contents("$path/dns.json", json_encode($dns));
     if ($rdap) file_put_contents("$path/rdap.json", $rdap);
+    if (!empty($metadata_files['robots_txt'])) file_put_contents("$path/robots.txt", $metadata_files['robots_txt']);
+    if (!empty($metadata_files['sitemap_xml'])) file_put_contents("$path/sitemap.xml", $metadata_files['sitemap_xml']);
+    if (!empty($metadata_files['security_txt'])) file_put_contents("$path/security.txt", $metadata_files['security_txt']);
+    if (!empty($metadata_files['favicon'])) file_put_contents("$path/favicon.ico", $metadata_files['favicon']);
+}
+
+// --- HASH-BASED FILE STORAGE ---
+function getFilesPath($domain) {
+    // SAFETY: Reject empty or suspicious domain values
+    if (empty($domain) || $domain === '.' || $domain === '..' || strpos($domain, '/') !== false) {
+        throw new Exception('Invalid domain for files path');
+    }
+    return getenv('HOME') . "/.periscope/scans/$domain/files";
+}
+
+function storeFileByHash($domain, $content, $extension) {
+    $hash = md5($content);
+    $filesPath = getFilesPath($domain);
+    if (!is_dir($filesPath)) mkdir($filesPath, 0755, true);
+
+    $filename = "$hash.$extension";
+    $filepath = "$filesPath/$filename";
+
+    // Only write if doesn't exist (deduplication)
+    if (!file_exists($filepath)) {
+        file_put_contents($filepath, $content);
+    }
+
+    return [
+        'hash' => $hash,
+        'filename' => $filename,
+        'extension' => $extension,
+        'size' => strlen($content)
+    ];
+}
+
+function getFileByHash($domain, $hash, $extension) {
+    $filepath = getFilesPath($domain) . "/$hash.$extension";
+    return file_exists($filepath) ? file_get_contents($filepath) : null;
+}
+
+function downloadImage($url, $maxSize = 2000000) {
+    $ctx = stream_context_create([
+        'http' => ['timeout' => 5, 'ignore_errors' => true, 'follow_location' => true],
+        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
+    ]);
+
+    $content = @file_get_contents($url, false, $ctx);
+    if (!$content || strlen($content) > $maxSize) return null;
+
+    // Detect extension from content type or URL
+    $extension = 'jpg'; // default
+    if (preg_match('/\.(\w{3,4})(?:\?|$)/', $url, $m)) {
+        $extension = strtolower($m[1]);
+    }
+    // Also check content magic bytes
+    if (substr($content, 0, 8) === "\x89PNG\r\n\x1a\n") $extension = 'png';
+    elseif (substr($content, 0, 3) === "\xff\xd8\xff") $extension = 'jpg';
+    elseif (substr($content, 0, 4) === "GIF8") $extension = 'gif';
+    elseif (substr($content, 0, 4) === "RIFF" && substr($content, 8, 4) === "WEBP") $extension = 'webp';
+
+    return ['content' => $content, 'extension' => $extension];
 }
 
 function saveResponseCache($path, $data) {
@@ -234,7 +382,11 @@ function loadRawFiles($path) {
         'whois_ips' => $whoisIps,
         'ssl' => @file_get_contents("$path/ssl.txt"),
         'dns' => @json_decode(@file_get_contents("$path/dns.json"), true) ?: [],
-        'rdap' => @file_get_contents("$path/rdap.json")
+        'rdap' => @file_get_contents("$path/rdap.json"),
+        'robots_txt' => @file_get_contents("$path/robots.txt"),
+        'sitemap_xml' => @file_get_contents("$path/sitemap.xml"),
+        'security_txt' => @file_get_contents("$path/security.txt"),
+        'favicon' => file_exists("$path/favicon.ico")
     ];
 }
 
@@ -251,7 +403,7 @@ function getRawRdap($domain) {
     $ch = curl_init("https://rdap.org/domain/" . $domain);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_USERAGENT, 'Periscope/1.1');
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Periscope/' . PERISCOPE_VERSION);
     $json = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
@@ -386,7 +538,7 @@ function getRawSSL($domain) {
     return shell_exec("echo | openssl s_client -servername " . escapeshellarg($domain) . " -connect " . escapeshellarg($domain) . ":443 2>/dev/null | openssl x509 -noout -dates -issuer -subject 2>/dev/null");
 }
 
-function detectCMS($domain, $html = null) {
+function detectCMS($domain, $html = null, $headers = []) {
     if ($html === null) {
         $html = @file_get_contents("https://" . $domain, false, stream_context_create([
             'http' => ['timeout' => 3, 'ignore_errors' => true],
@@ -398,13 +550,61 @@ function detectCMS($domain, $html = null) {
     }
     if (!$html) return null;
 
+    $is_wp = false;
+    
+    // 1. Standard Paths
+    if (preg_match('/wp-content|wp-includes/i', $html)) $is_wp = true;
+    
+    // 2. REST API Link (Common on masked sites or custom structures like Bedrock)
+    if (!$is_wp && preg_match('/<link[^>]+rel=["\']https:\/\/api\.w\.org\//i', $html)) $is_wp = true;
+    
+    // 3. Block Library CSS (Common on Gutenberg sites)
+    if (!$is_wp && preg_match('/id=["\']wp-block-library-css/i', $html)) $is_wp = true;
+    
+    // 4. Generator Tag
+    if (!$is_wp && preg_match('/<meta[^>]+name=["\']generator["\'][^>]+content=["\']WordPress/i', $html)) $is_wp = true;
+
+    // 5. Header Check
+    if (!$is_wp && !empty($headers)) {
+        foreach ($headers as $k => $v) {
+            if (stripos($k, 'x-powered-by') !== false && stripos($v, 'WordPress') !== false) $is_wp = true;
+            // Common WordPress Link header for REST API
+            if (stripos($k, 'link') !== false && stripos($v, 'api.w.org') !== false) $is_wp = true;
+        }
+    }
+
     // WordPress
-    if (preg_match('/wp-content|wp-includes/i', $html)) {
+    if ($is_wp) {
         $version = null;
         if (preg_match('/<meta[^>]+generator[^>]+WordPress\s*([\d.]+)?/i', $html, $m)) {
             $version = $m[1] ?? null;
         }
-        return ['name' => 'WordPress', 'version' => $version];
+
+        // Detect WordPress plugins from wp-content/plugins paths
+        $plugins = [];
+        if (preg_match_all('/wp-content\/plugins\/([a-zA-Z0-9_-]+)/i', $html, $pluginMatches)) {
+            $plugins = array_unique($pluginMatches[1]);
+            // Filter out common false positives
+            $plugins = array_filter($plugins, function($p) {
+                return !in_array(strtolower($p), ['js', 'css', 'images', 'assets']);
+            });
+            $plugins = array_values($plugins);
+            sort($plugins);
+        }
+
+        // Detect WordPress Multisite (uploads/sites/<id>/)
+        $multisite = false;
+        if (preg_match('/\/uploads\/sites\/\d+\//i', $html)) {
+            $multisite = true;
+        }
+
+        // Detect WP Freighter Multitenancy (content/<id>/plugins/)
+        $multitenancy = false;
+        if (preg_match('/\/content\/\d+\/plugins\//i', $html)) {
+            $multitenancy = true;
+        }
+
+        return ['name' => 'WordPress', 'version' => $version, 'plugins' => $plugins, 'multisite' => $multisite, 'multitenancy' => $multitenancy];
     }
 
     // Shopify
@@ -850,7 +1050,7 @@ function detectTechnology($html, $headers = []) {
     return $result;
 }
 
-function detectMetadata($domain, $html = null) {
+function detectMetadata($domain, $html = null, &$rawFiles = []) {
     $result = [
         'robots_txt' => null,
         'sitemap' => null,
@@ -858,6 +1058,7 @@ function detectMetadata($domain, $html = null) {
         'meta_tags' => [],
         'favicon' => null
     ];
+    $rawFiles = ['robots_txt' => null, 'sitemap_xml' => null, 'security_txt' => null, 'favicon' => null];
 
     $ctx = stream_context_create([
         'http' => ['timeout' => 2, 'ignore_errors' => true],
@@ -868,6 +1069,7 @@ function detectMetadata($domain, $html = null) {
     $robots = @file_get_contents("https://" . $domain . "/robots.txt", false, $ctx);
     if (!$robots) $robots = @file_get_contents("http://" . $domain . "/robots.txt", false, $ctx);
     if ($robots && stripos($robots, 'user-agent') !== false) {
+        $rawFiles['robots_txt'] = $robots;
         $disallows = [];
         $sitemaps = [];
         foreach (explode("\n", $robots) as $line) {
@@ -895,6 +1097,7 @@ function detectMetadata($domain, $html = null) {
         $sitemap = @file_get_contents("https://" . $domain . "/sitemap.xml", false, $ctx);
         if (!$sitemap) $sitemap = @file_get_contents("http://" . $domain . "/sitemap.xml", false, $ctx);
         if ($sitemap && (stripos($sitemap, '<urlset') !== false || stripos($sitemap, '<sitemapindex') !== false)) {
+            $rawFiles['sitemap_xml'] = $sitemap;
             $urlCount = substr_count($sitemap, '<url>') + substr_count($sitemap, '<sitemap>');
             $result['sitemap'] = ['present' => true, 'url' => '/sitemap.xml', 'url_count' => $urlCount];
         } else {
@@ -908,6 +1111,7 @@ function detectMetadata($domain, $html = null) {
     $securityTxt = @file_get_contents("https://" . $domain . "/.well-known/security.txt", false, $ctx);
     if (!$securityTxt) $securityTxt = @file_get_contents("https://" . $domain . "/security.txt", false, $ctx);
     if ($securityTxt && (stripos($securityTxt, 'contact:') !== false || stripos($securityTxt, 'policy:') !== false)) {
+        $rawFiles['security_txt'] = $securityTxt;
         $contact = null;
         $policy = null;
         foreach (explode("\n", $securityTxt) as $line) {
@@ -927,6 +1131,18 @@ function detectMetadata($domain, $html = null) {
         if (preg_match('/<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $og['description'] = $m[1];
         if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $og['image'] = $m[1];
         if (preg_match('/<meta[^>]+property=["\']og:type["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $og['type'] = $m[1];
+
+        // Download and store OG image
+        if (isset($og['image']) && $og['image']) {
+            $ogImageData = downloadImage($og['image']);
+            if ($ogImageData) {
+                $stored = storeFileByHash($domain, $ogImageData['content'], $ogImageData['extension']);
+                $og['image_hash'] = $stored['hash'];
+                $og['image_extension'] = $stored['extension'];
+                $og['image_size'] = $stored['size'];
+            }
+        }
+
         if (!empty($og)) $result['meta_tags']['open_graph'] = $og;
 
         // Twitter Cards
@@ -934,6 +1150,19 @@ function detectMetadata($domain, $html = null) {
         if (preg_match('/<meta[^>]+name=["\']twitter:card["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $twitter['card'] = $m[1];
         if (preg_match('/<meta[^>]+name=["\']twitter:site["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $twitter['site'] = $m[1];
         if (preg_match('/<meta[^>]+name=["\']twitter:title["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $twitter['title'] = $m[1];
+        if (preg_match('/<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $twitter['image'] = $m[1];
+
+        // Download and store Twitter image if different from OG
+        if (isset($twitter['image']) && $twitter['image'] && $twitter['image'] !== ($og['image'] ?? '')) {
+            $twitterImageData = downloadImage($twitter['image']);
+            if ($twitterImageData) {
+                $stored = storeFileByHash($domain, $twitterImageData['content'], $twitterImageData['extension']);
+                $twitter['image_hash'] = $stored['hash'];
+                $twitter['image_extension'] = $stored['extension'];
+                $twitter['image_size'] = $stored['size'];
+            }
+        }
+
         if (!empty($twitter)) $result['meta_tags']['twitter'] = $twitter;
 
         // Basic meta
@@ -951,22 +1180,104 @@ function detectMetadata($domain, $html = null) {
         }
     }
 
-    // Favicon hash (MD5 for fingerprinting)
-    $favicon = @file_get_contents("https://" . $domain . "/favicon.ico", false, $ctx);
-    if (!$favicon) $favicon = @file_get_contents("http://" . $domain . "/favicon.ico", false, $ctx);
+    // Favicon detection - prefer high-quality icons from HTML, fallback to /favicon.ico
+    $favicon = null;
+    $faviconUrl = null;
+    $faviconSource = null;
+
+    if ($html) {
+        // Parse all icon links from HTML with their sizes
+        $iconCandidates = [];
+
+        // Match rel="icon" with sizes attribute
+        if (preg_match_all('/<link[^>]+rel=["\'](?:shortcut )?icon["\'][^>]*>/i', $html, $matches)) {
+            foreach ($matches[0] as $tag) {
+                if (preg_match('/href=["\']([^"\']+)/i', $tag, $hrefMatch)) {
+                    $url = $hrefMatch[1];
+                    $hasExplicitSize = false;
+                    $size = 128; // default for icons without sizes (assume decent quality)
+                    if (preg_match('/sizes=["\'](\d+)x\d+/i', $tag, $sizeMatch)) {
+                        $size = (int)$sizeMatch[1];
+                        $hasExplicitSize = true;
+                    }
+                    // Boost priority for modern high-quality formats without explicit sizes
+                    if (!$hasExplicitSize && preg_match('/\.(webp|png|svg)(\?|$)/i', $url)) {
+                        $size = 192; // prefer these formats
+                    }
+                    $iconCandidates[] = ['url' => $url, 'size' => $size, 'type' => 'icon'];
+                }
+            }
+        }
+
+        // Match apple-touch-icon (usually 180x180)
+        if (preg_match_all('/<link[^>]+rel=["\']apple-touch-icon["\'][^>]*>/i', $html, $matches)) {
+            foreach ($matches[0] as $tag) {
+                if (preg_match('/href=["\']([^"\']+)/i', $tag, $hrefMatch)) {
+                    $size = 180; // default for apple-touch-icon
+                    if (preg_match('/sizes=["\'](\d+)x\d+/i', $tag, $sizeMatch)) {
+                        $size = (int)$sizeMatch[1];
+                    }
+                    $iconCandidates[] = ['url' => $hrefMatch[1], 'size' => $size, 'type' => 'apple-touch-icon'];
+                }
+            }
+        }
+
+        // Sort by size descending to prefer larger icons
+        usort($iconCandidates, fn($a, $b) => $b['size'] - $a['size']);
+
+        // Try to download the best icon
+        foreach ($iconCandidates as $candidate) {
+            $url = $candidate['url'];
+            // Handle relative URLs
+            if (strpos($url, '//') === 0) {
+                $url = 'https:' . $url;
+            } elseif (strpos($url, '/') === 0) {
+                $url = 'https://' . $domain . $url;
+            } elseif (strpos($url, 'http') !== 0) {
+                $url = 'https://' . $domain . '/' . $url;
+            }
+
+            $iconData = downloadImage($url, 500000);
+            if ($iconData && $iconData['content']) {
+                $favicon = $iconData['content'];
+                $faviconUrl = $candidate['url'];
+                $faviconSource = $candidate['type'] . ' (' . $candidate['size'] . 'x' . $candidate['size'] . ')';
+                break;
+            }
+        }
+    }
+
+    // Fallback to /favicon.ico if no HTML icon found
+    if (!$favicon) {
+        $favicon = @file_get_contents("https://" . $domain . "/favicon.ico", false, $ctx);
+        if (!$favicon) $favicon = @file_get_contents("http://" . $domain . "/favicon.ico", false, $ctx);
+        if ($favicon) {
+            $faviconUrl = '/favicon.ico';
+            $faviconSource = 'favicon.ico';
+        }
+    }
+
     if ($favicon && strlen($favicon) > 0 && strlen($favicon) < 500000) {
+        $rawFiles['favicon'] = $favicon;
+
+        // Detect actual format from magic bytes
+        $extension = 'ico';
+        if (substr($favicon, 0, 8) === "\x89PNG\r\n\x1a\n") $extension = 'png';
+        elseif (substr($favicon, 0, 3) === "\xff\xd8\xff") $extension = 'jpg';
+        elseif (substr($favicon, 0, 4) === "GIF8") $extension = 'gif';
+        elseif (substr($favicon, 0, 4) === "RIFF" && substr($favicon, 8, 4) === "WEBP") $extension = 'webp';
+
+        // Store in hash-based location
+        $stored = storeFileByHash($domain, $favicon, $extension);
         $result['favicon'] = [
             'present' => true,
-            'hash' => md5($favicon),
-            'size' => strlen($favicon)
+            'hash' => $stored['hash'],
+            'extension' => $extension,
+            'size' => $stored['size'],
+            'source' => $faviconSource
         ];
     } else {
-        // Try to find favicon in HTML
-        if ($html && preg_match('/<link[^>]+rel=["\'](?:shortcut )?icon["\'][^>]+href=["\']([^"\']+)/i', $html, $m)) {
-            $result['favicon'] = ['present' => true, 'url' => $m[1], 'hash' => null];
-        } else {
-            $result['favicon'] = ['present' => false];
-        }
+        $result['favicon'] = ['present' => false];
     }
 
     return $result;
@@ -1013,7 +1324,7 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
         'ip_lookup' => $ip_lookup,
         'http_headers' => $headers,
         'ssl' => getSSLInfo($domain, $rawSsl),
-        'cms' => detectCMS($domain, $html),
+        'cms' => detectCMS($domain, $html, $headers),
         'infrastructure' => detectInfrastructure($headers),
         'security' => detectSecurityHeaders($headers),
         'technology' => detectTechnology($html, $headers),
@@ -1035,9 +1346,33 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
 function performLookup($domain) {
     $errors = []; $raw_records = []; $check_map = [];
 
+    // Normalize input and extract target host vs root domain
+    $targetHost = normalizeInput($domain);
+    $rootDomain = extractRootDomain($targetHost);
+    $isSubdomain = ($targetHost !== $rootDomain);
+
+    // SAFETY CHECK: Abort if domain is empty or invalid
+    if (empty($targetHost) || empty($rootDomain) || !preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i', $targetHost)) {
+        return ['error' => 'Invalid or empty domain', 'domain' => [], 'dns_records' => [], 'zone' => '', 'errors' => ['Invalid domain provided']];
+    }
+
+    // Check for wildcard A record on root domain
+    $wildcardA = shell_exec("dig +short -t A " . escapeshellarg("*.$rootDomain"));
+    $hasWildcardA = !empty(trim($wildcardA));
+    
+    // If wildcard exists, record it
+    if ($hasWildcardA) {
+        foreach (explode("\n", trim($wildcardA)) as $val) {
+            $val = trim($val); if (empty($val)) continue;
+            $key = "A|*|$val"; if (isset($check_map[$key])) continue;
+            $check_map[$key] = true;
+            $raw_records[] = ['type' => 'A', 'name' => '*', 'value' => $val];
+        }
+    }
+
     $checks = [
-        // Core records
-        ['type' => 'A', 'name' => ''], ['type' => 'A', 'name' => '*'], ['type' => 'A', 'name' => 'www'],
+        // Core records (skip wildcard since we already checked it)
+        ['type' => 'A', 'name' => ''], ['type' => 'A', 'name' => 'www'],
         ['type' => 'AAAA', 'name' => ''], ['type' => 'AAAA', 'name' => 'www'],
         ['type' => 'NS', 'name' => ''], ['type' => 'SOA', 'name' => ''], ['type' => 'MX', 'name' => ''], ['type' => 'TXT', 'name' => ''],
         ['type' => 'CAA', 'name' => ''],
@@ -1125,9 +1460,31 @@ function performLookup($domain) {
         ['type' => 'TXT', 'name' => '_facebook'], ['type' => 'TXT', 'name' => '_dnslink']
     ];
 
+    // If scanning a subdomain, first check DNS for the target host specifically
+    if ($isSubdomain) {
+        $subdomainPart = str_replace('.' . $rootDomain, '', $targetHost);
+        foreach (['A', 'AAAA', 'CNAME'] as $type) {
+            $output = shell_exec("dig +short -t $type " . escapeshellarg($targetHost));
+            if (!$output) continue;
+            foreach (explode("\n", trim($output)) as $val) {
+                $val = trim($val); if (empty($val)) continue;
+                $key = "$type|$subdomainPart|$val"; if (isset($check_map[$key])) continue;
+                $check_map[$key] = true;
+                $raw_records[] = ['type' => $type, 'name' => $subdomainPart, 'value' => $val];
+            }
+        }
+    }
+
     foreach ($checks as $check) {
         $type = $check['type']; $name = $check['name'];
-        $host = $name ? "$name.$domain" : $domain;
+
+        // Skip subdomain A record checks if wildcard A exists (they would all match wildcard)
+        if ($hasWildcardA && $type === 'A' && !empty($name) && $name !== 'www') {
+            continue;
+        }
+
+        // DNS queries are relative to root domain
+        $host = $name ? "$name.$rootDomain" : $rootDomain;
         $output = shell_exec("dig +short -t $type " . escapeshellarg($host));
         if (!$output) continue;
         foreach (explode("\n", trim($output)) as $val) {
@@ -1143,7 +1500,7 @@ function performLookup($domain) {
     foreach ($raw_records as $r) if ($r['type'] === 'CNAME') $cname_hosts[$r['name']] = true;
     
     $dns_records = [];
-    $zone = new Zone($domain . ".");
+    $zone = new Zone($rootDomain . ".");
     $zone->setDefaultTtl(3600);
 
     foreach ($raw_records as $r) {
@@ -1168,8 +1525,8 @@ function performLookup($domain) {
     $builder->addRdataFormatter('TXT', 'specialTxtFormatter');
     $zoneFile = $builder->build($zone);
 
-    // Capture raw IP WHOIS data
-    $ips = gethostbynamel($domain); $ip_lookup = []; $rawWhoisIps = [];
+    // Capture raw IP WHOIS data - resolve IPs for the target host
+    $ips = gethostbynamel($targetHost); $ip_lookup = []; $rawWhoisIps = [];
     if ($ips) foreach ($ips as $ip) {
         $rawIpWhois = shell_exec("whois " . escapeshellarg($ip));
         $rawWhoisIps[$ip] = $rawIpWhois;
@@ -1186,55 +1543,73 @@ function performLookup($domain) {
         $ip_lookup[$ip] = $res ?: 'N/A';
     }
 
-    // Capture raw HTTP headers
+    // Capture raw HTTP headers - from target host
     $headers = [];
-    $h_out = shell_exec("curl -I -s -L --max-time 3 " . escapeshellarg("https://".$domain));
-    if (!$h_out) $h_out = shell_exec("curl -I -s -L --max-time 2 " . escapeshellarg("http://".$domain));
+    $h_out = shell_exec("curl -I -s -L --max-time 3 " . escapeshellarg("https://".$targetHost));
+    if (!$h_out) $h_out = shell_exec("curl -I -s -L --max-time 2 " . escapeshellarg("http://".$targetHost));
     if($h_out) foreach(explode("\n", $h_out) as $line) {
         if(strpos($line, ':')) { [$k, $v] = explode(':', $line, 2); $headers[trim($k)] = trim($v); }
     }
 
-    // Fetch HTML once for multiple detection functions
-    $html = @file_get_contents("https://" . $domain, false, stream_context_create([
+    // Fetch HTML once for multiple detection functions - from target host
+    $html = @file_get_contents("https://" . $targetHost, false, stream_context_create([
         'http' => ['timeout' => 3, 'ignore_errors' => true],
         'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
     ]));
-    if (!$html) $html = @file_get_contents("http://" . $domain, false, stream_context_create([
+    if (!$html) $html = @file_get_contents("http://" . $targetHost, false, stream_context_create([
         'http' => ['timeout' => 3, 'ignore_errors' => true]
     ]));
 
-    // Capture raw SSL output
-    $rawSsl = getRawSSL($domain);
+    // Capture raw SSL output - from target host
+    $rawSsl = getRawSSL($targetHost);
 
-    // Capture raw WHOIS for domain
-    $rawWhoisDomain = getRawWhoisDomain($domain);
+    // Capture raw WHOIS for domain - always from root domain
+    $rawWhoisDomain = getRawWhoisDomain($rootDomain);
 
-    // Capture RDAP JSON (for rich domain info)
-    $rawRdap = getRawRdap($domain);
+    // Capture RDAP JSON (for rich domain info) - always from root domain
+    $rawRdap = getRawRdap($rootDomain);
 
     // Get timestamp for this scan
     $timestamp = time();
 
-    // Save raw files to disk
-    $scanPath = getScanPath($domain, $timestamp);
-    saveRawFiles($scanPath, $html, $headers, $rawWhoisDomain, $rawWhoisIps, $rawSsl, [
-        'records' => $dns_records,
-        'zone' => $zoneFile
-    ], $rawRdap);
-
-    // Run detection functions
-    $ssl = getSSLInfo($domain, $rawSsl);
-    $cms = detectCMS($domain, $html);
+    // Run detection functions - tech detection uses target host
+    $ssl = getSSLInfo($targetHost, $rawSsl);
+    $cms = detectCMS($targetHost, $html, $headers);
     $infra = detectInfrastructure($headers);
     $security = detectSecurityHeaders($headers);
     $technology = detectTechnology($html, $headers);
-    $metadata = detectMetadata($domain, $html);
+    $metadataRawFiles = [];
+    $metadata = detectMetadata($targetHost, $html, $metadataRawFiles);
+
+    // Save raw files to disk - under target host
+    $scanPath = getScanPath($targetHost, $timestamp);
+    saveRawFiles($scanPath, $html, $headers, $rawWhoisDomain, $rawWhoisIps, $rawSsl, [
+        'records' => $dns_records,
+        'zone' => $zoneFile
+    ], $rawRdap, $metadataRawFiles);
 
     // Parse domain WHOIS: prefer RDAP, fallback to raw whois
     $domainData = $rawRdap ? parseRdap($rawRdap) : [];
     if (empty($domainData)) $domainData = parseRawWhois($rawWhoisDomain);
 
+    // Add flags for which metadata files were captured
+    if ($metadata['robots_txt'] && $metadata['robots_txt']['present']) {
+        $metadata['robots_txt']['raw_stored'] = !empty($metadataRawFiles['robots_txt']);
+    }
+    if ($metadata['sitemap'] && $metadata['sitemap']['present'] && !isset($metadata['sitemap']['urls'])) {
+        $metadata['sitemap']['raw_stored'] = !empty($metadataRawFiles['sitemap_xml']);
+    }
+    if ($metadata['security_txt'] && $metadata['security_txt']['present']) {
+        $metadata['security_txt']['raw_stored'] = !empty($metadataRawFiles['security_txt']);
+    }
+    if ($metadata['favicon'] && $metadata['favicon']['present'] && isset($metadata['favicon']['hash'])) {
+        $metadata['favicon']['raw_stored'] = !empty($metadataRawFiles['favicon']);
+    }
+
     $result = [
+        'target_host' => $targetHost,
+        'root_domain' => $rootDomain,
+        'is_subdomain' => $isSubdomain,
         'domain' => $domainData, 'dns_records' => $dns_records, 'zone' => $zoneFile,
         'ip_lookup' => $ip_lookup, 'http_headers' => $headers, 'ssl' => $ssl, 'cms' => $cms,
         'infrastructure' => $infra, 'security' => $security, 'technology' => $technology,
@@ -1248,6 +1623,355 @@ function performLookup($domain) {
     return $result;
 }
 
+// --- SSE PROGRESS HELPERS ---
+function sendProgress($step, $total, $message) {
+    echo "data: " . json_encode([
+        'type' => 'progress',
+        'step' => $step,
+        'total' => $total,
+        'message' => $message,
+        'percent' => round(($step / $total) * 100)
+    ]) . "\n\n";
+    @ob_flush();
+    flush();
+}
+
+function sendComplete($data) {
+    echo "data: " . json_encode([
+        'type' => 'complete',
+        'data' => $data
+    ]) . "\n\n";
+    @ob_flush();
+    flush();
+}
+
+function sendError($message) {
+    echo "data: " . json_encode([
+        'type' => 'error',
+        'message' => $message
+    ]) . "\n\n";
+    @ob_flush();
+    flush();
+}
+
+// --- PHASED LOOKUP WITH PROGRESS ---
+function performLookupWithProgress($domain) {
+    global $pdo;
+    $errors = []; $raw_records = []; $check_map = [];
+    $total_steps = 6;
+
+    // === INPUT NORMALIZATION ===
+    // Normalize input and extract target host vs root domain
+    $targetHost = normalizeInput($domain);
+    $rootDomain = extractRootDomain($targetHost);
+    $isSubdomain = ($targetHost !== $rootDomain);
+
+    // SAFETY CHECK: Abort if domain is empty or invalid
+    if (empty($targetHost) || empty($rootDomain) || !preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i', $targetHost)) {
+        sendError('Invalid or empty domain provided');
+        return ['error' => 'Invalid or empty domain'];
+    }
+
+    // === PHASE 1: Core DNS & Subdomains ===
+    sendProgress(1, $total_steps, 'Scanning core DNS records...');
+
+    // Check for wildcard A record on root domain
+    $wildcardA = shell_exec("dig +short -t A " . escapeshellarg("*.$rootDomain"));
+    $hasWildcardA = !empty(trim($wildcardA));
+    
+    // If wildcard exists, record it
+    if ($hasWildcardA) {
+        foreach (explode("\n", trim($wildcardA)) as $val) {
+            $val = trim($val); if (empty($val)) continue;
+            $key = "A|*|$val"; if (isset($check_map[$key])) continue;
+            $check_map[$key] = true;
+            $raw_records[] = ['type' => 'A', 'name' => '*', 'value' => $val];
+        }
+    }
+
+    $checks_core = [
+        // Core records (skip wildcard since we already checked it)
+        ['type' => 'A', 'name' => ''], ['type' => 'A', 'name' => 'www'],
+        ['type' => 'AAAA', 'name' => ''], ['type' => 'AAAA', 'name' => 'www'],
+        ['type' => 'NS', 'name' => ''], ['type' => 'SOA', 'name' => ''], ['type' => 'MX', 'name' => ''], ['type' => 'TXT', 'name' => ''],
+        ['type' => 'CAA', 'name' => ''],
+        ['type' => 'HTTPS', 'name' => ''], ['type' => 'SVCB', 'name' => ''],
+        ['type' => 'TLSA', 'name' => '_443._tcp'], ['type' => 'TLSA', 'name' => '_25._tcp'],
+
+        // Common subdomains
+        ['type' => 'A', 'name' => 'mail'], ['type' => 'A', 'name' => 'webmail'], ['type' => 'A', 'name' => 'smtp'],
+        ['type' => 'A', 'name' => 'imap'], ['type' => 'A', 'name' => 'ftp'], ['type' => 'A', 'name' => 'cpanel'],
+        ['type' => 'A', 'name' => 'whm'], ['type' => 'A', 'name' => 'plesk'], ['type' => 'A', 'name' => 'blog'],
+        ['type' => 'A', 'name' => 'shop'], ['type' => 'A', 'name' => 'portal'], ['type' => 'A', 'name' => 'dev'],
+        ['type' => 'A', 'name' => 'api'], ['type' => 'A', 'name' => 'app'], ['type' => 'A', 'name' => 'remote'],
+        ['type' => 'A', 'name' => 'vpn'],
+
+        // Additional subdomains
+        ['type' => 'A', 'name' => 'staging'], ['type' => 'A', 'name' => 'stage'],
+        ['type' => 'A', 'name' => 'test'], ['type' => 'A', 'name' => 'testing'],
+        ['type' => 'A', 'name' => 'uat'], ['type' => 'A', 'name' => 'demo'],
+        ['type' => 'A', 'name' => 'admin'], ['type' => 'A', 'name' => 'administrator'],
+        ['type' => 'A', 'name' => 'dashboard'], ['type' => 'A', 'name' => 'panel'],
+        ['type' => 'A', 'name' => 'login'], ['type' => 'A', 'name' => 'signin'],
+        ['type' => 'A', 'name' => 'auth'], ['type' => 'A', 'name' => 'sso'], ['type' => 'A', 'name' => 'oauth'],
+        ['type' => 'A', 'name' => 'secure'], ['type' => 'A', 'name' => 'ssl'],
+        ['type' => 'A', 'name' => 'static'], ['type' => 'A', 'name' => 'assets'], ['type' => 'A', 'name' => 'img'], ['type' => 'A', 'name' => 'images'],
+        ['type' => 'A', 'name' => 'media'], ['type' => 'A', 'name' => 'files'], ['type' => 'A', 'name' => 'downloads'],
+        ['type' => 'A', 'name' => 'docs'], ['type' => 'A', 'name' => 'documentation'],
+        ['type' => 'A', 'name' => 'support'], ['type' => 'A', 'name' => 'help'], ['type' => 'A', 'name' => 'kb'],
+        ['type' => 'A', 'name' => 'beta'], ['type' => 'A', 'name' => 'alpha'], ['type' => 'A', 'name' => 'sandbox'],
+        ['type' => 'A', 'name' => 'internal'], ['type' => 'A', 'name' => 'intranet'],
+        ['type' => 'A', 'name' => 'gateway'], ['type' => 'A', 'name' => 'proxy'],
+        ['type' => 'A', 'name' => 'git'], ['type' => 'A', 'name' => 'gitlab'], ['type' => 'A', 'name' => 'jenkins'], ['type' => 'A', 'name' => 'ci'],
+
+        // Microsoft / Office 365
+        ['type' => 'CNAME', 'name' => 'cdn'], ['type' => 'CNAME', 'name' => 'status'],
+        ['type' => 'CNAME', 'name' => 'autodiscover'], ['type' => 'CNAME', 'name' => 'lyncdiscover'], ['type' => 'CNAME', 'name' => 'sip'],
+        ['type' => 'CNAME', 'name' => 'enterpriseregistration'], ['type' => 'CNAME', 'name' => 'enterpriseenrollment'], ['type' => 'CNAME', 'name' => 'msoid'],
+        ['type' => 'SRV', 'name' => '_sip._tls'], ['type' => 'SRV', 'name' => '_sipfederationtls._tcp'], ['type' => 'SRV', 'name' => '_autodiscover._tcp'],
+        ['type' => 'SRV', 'name' => '_submissions._tcp'], ['type' => 'SRV', 'name' => '_imaps._tcp'],
+    ];
+
+    // If scanning a subdomain, first check DNS for the target host specifically
+    if ($isSubdomain) {
+        $subdomainPart = str_replace('.' . $rootDomain, '', $targetHost);
+        foreach (['A', 'AAAA', 'CNAME'] as $type) {
+            $output = shell_exec("dig +short -t $type " . escapeshellarg($targetHost));
+            if (!$output) continue;
+            foreach (explode("\n", trim($output)) as $val) {
+                $val = trim($val); if (empty($val)) continue;
+                $key = "$type|$subdomainPart|$val"; if (isset($check_map[$key])) continue;
+                $check_map[$key] = true;
+                $raw_records[] = ['type' => $type, 'name' => $subdomainPart, 'value' => $val];
+            }
+        }
+    }
+
+    foreach ($checks_core as $check) {
+        $type = $check['type']; $name = $check['name'];
+
+        // Skip subdomain A record checks if wildcard A exists (they would all match wildcard)
+        if ($hasWildcardA && $type === 'A' && !empty($name) && $name !== 'www') {
+            continue;
+        }
+
+        // DNS queries are relative to root domain
+        $host = $name ? "$name.$rootDomain" : $rootDomain;
+        $output = shell_exec("dig +short -t $type " . escapeshellarg($host));
+        if (!$output) continue;
+        foreach (explode("\n", trim($output)) as $val) {
+            $val = trim($val); if (empty($val)) continue;
+            $key = "$type|$name|$val"; if (isset($check_map[$key])) continue;
+            $check_map[$key] = true;
+            $raw_records[] = ['type' => $type, 'name' => $name ?: '@', 'value' => $val];
+        }
+    }
+
+    // === PHASE 2: Email & DKIM Records ===
+    sendProgress(2, $total_steps, 'Scanning email & DKIM records...');
+
+    $checks_email = [
+        // Email authentication - DMARC, MTA-STS, TLS-RPT, BIMI
+        ['type' => 'TXT', 'name' => '_dmarc'], ['type' => 'TXT', 'name' => '_mta-sts'], ['type' => 'CNAME', 'name' => 'mta-sts'],
+        ['type' => 'TXT', 'name' => '_smtp._tls'], ['type' => 'TXT', 'name' => 'default._bimi'],
+
+        // DKIM selectors - Common
+        ['type' => 'TXT', 'name' => 'google._domainkey'], ['type' => 'TXT', 'name' => 'default._domainkey'],
+        ['type' => 'TXT', 'name' => 'k1._domainkey'], ['type' => 'TXT', 'name' => 'k2._domainkey'], ['type' => 'TXT', 'name' => 'k3._domainkey'],
+        ['type' => 'TXT', 'name' => 's1._domainkey'], ['type' => 'TXT', 'name' => 's2._domainkey'],
+        ['type' => 'TXT', 'name' => 'selector1._domainkey'], ['type' => 'TXT', 'name' => 'selector2._domainkey'],
+        ['type' => 'CNAME', 'name' => 'k1._domainkey'], ['type' => 'CNAME', 'name' => 's1._domainkey'],
+        ['type' => 'CNAME', 'name' => 'selector1._domainkey'], ['type' => 'CNAME', 'name' => 'selector2._domainkey'],
+
+        // DKIM selectors - Email service providers
+        ['type' => 'TXT', 'name' => 'mandrill._domainkey'], ['type' => 'CNAME', 'name' => 'mandrill._domainkey'],
+        ['type' => 'TXT', 'name' => 'mxvault._domainkey'], ['type' => 'CNAME', 'name' => 'mxvault._domainkey'],
+        ['type' => 'TXT', 'name' => 'postmark._domainkey'], ['type' => 'CNAME', 'name' => 'postmark._domainkey'],
+        ['type' => 'TXT', 'name' => 'pm._domainkey'], ['type' => 'CNAME', 'name' => 'pm._domainkey'],
+        ['type' => 'TXT', 'name' => 'mailjet._domainkey'], ['type' => 'CNAME', 'name' => 'mailjet._domainkey'],
+        ['type' => 'TXT', 'name' => 'sendgrid._domainkey'], ['type' => 'CNAME', 'name' => 'sendgrid._domainkey'],
+        ['type' => 'TXT', 'name' => 'smtpapi._domainkey'], ['type' => 'CNAME', 'name' => 'smtpapi._domainkey'],
+        ['type' => 'CNAME', 'name' => 's1._domainkey'], ['type' => 'CNAME', 'name' => 's2._domainkey'],
+        ['type' => 'TXT', 'name' => 'amazonses._domainkey'], ['type' => 'CNAME', 'name' => 'amazonses._domainkey'],
+        ['type' => 'TXT', 'name' => 'sparkpost._domainkey'], ['type' => 'CNAME', 'name' => 'sparkpost._domainkey'],
+        ['type' => 'TXT', 'name' => 'cm._domainkey'], ['type' => 'CNAME', 'name' => 'cm._domainkey'],
+        ['type' => 'TXT', 'name' => 'dkim._domainkey'], ['type' => 'CNAME', 'name' => 'dkim._domainkey'],
+        ['type' => 'TXT', 'name' => 'mail._domainkey'], ['type' => 'CNAME', 'name' => 'mail._domainkey'],
+        ['type' => 'TXT', 'name' => 'zendesk1._domainkey'], ['type' => 'TXT', 'name' => 'zendesk2._domainkey'],
+        ['type' => 'CNAME', 'name' => 'zendesk1._domainkey'], ['type' => 'CNAME', 'name' => 'zendesk2._domainkey'],
+        ['type' => 'TXT', 'name' => 'mailgun._domainkey'], ['type' => 'CNAME', 'name' => 'mailgun._domainkey'],
+        ['type' => 'TXT', 'name' => 'krs._domainkey'], ['type' => 'CNAME', 'name' => 'krs._domainkey'],
+        ['type' => 'TXT', 'name' => 'protonmail._domainkey'], ['type' => 'TXT', 'name' => 'protonmail2._domainkey'], ['type' => 'TXT', 'name' => 'protonmail3._domainkey'],
+
+        // Mailgun subdomain
+        ['type' => 'MX', 'name' => 'mg'], ['type' => 'CNAME', 'name' => 'email.mg'],
+        ['type' => 'TXT', 'name' => 'smtp._domainkey.mg'], ['type' => 'TXT', 'name' => 'mg'],
+
+        // Other email/verification records
+        ['type' => 'TXT', 'name' => '_amazonses'], ['type' => 'TXT', 'name' => '_mailchannels'],
+        ['type' => 'TXT', 'name' => 'zmail._domainkey'], ['type' => 'TXT', 'name' => 'zoho._domainkey'],
+
+        // ACME/Let's Encrypt
+        ['type' => 'CNAME', 'name' => '_acme-challenge'], ['type' => 'TXT', 'name' => '_acme-challenge'],
+
+        // Domain verification records
+        ['type' => 'TXT', 'name' => '_google'], ['type' => 'TXT', 'name' => '_github-challenge'],
+        ['type' => 'TXT', 'name' => '_facebook'], ['type' => 'TXT', 'name' => '_dnslink']
+    ];
+
+    foreach ($checks_email as $check) {
+        $type = $check['type']; $name = $check['name'];
+        // Email/DKIM records are always on the root domain
+        $host = $name ? "$name.$rootDomain" : $rootDomain;
+        $output = shell_exec("dig +short -t $type " . escapeshellarg($host));
+        if (!$output) continue;
+        foreach (explode("\n", trim($output)) as $val) {
+            $val = trim($val); if (empty($val)) continue;
+            $key = "$type|$name|$val"; if (isset($check_map[$key])) continue;
+            $check_map[$key] = true;
+            $raw_records[] = ['type' => $type, 'name' => $name ?: '@', 'value' => $val];
+        }
+    }
+
+    // CNAME Exclusivity Logic
+    $cname_hosts = [];
+    foreach ($raw_records as $r) if ($r['type'] === 'CNAME') $cname_hosts[$r['name']] = true;
+
+    $dns_records = [];
+    $zone = new Zone($rootDomain . ".");
+    $zone->setDefaultTtl(3600);
+
+    foreach ($raw_records as $r) {
+        if (isset($cname_hosts[$r['name']]) && $r['type'] !== 'CNAME') continue;
+        $dns_records[] = $r;
+        try {
+            $rr = new ResourceRecord(); $rr->setName($r['name']); $rr->setClass('IN');
+            switch ($r['type']) {
+                case 'A': $rr->setRdata(Factory::A($r['value'])); break;
+                case 'CNAME': $rr->setRdata(Factory::Cname($r['value'])); break;
+                case 'NS': $rr->setRdata(Factory::Ns($r['value'])); break;
+                case 'TXT': $rr->setRdata(Factory::Txt(trim($r['value'], '"'))); break;
+                case 'MX': $p = explode(' ', $r['value']); if(count($p)==2) $rr->setRdata(Factory::Mx($p[0], $p[1])); break;
+                case 'SOA': $p = explode(' ', $r['value']); if(count($p)>=7) $rr->setRdata(Factory::Soa($p[0],$p[1],$p[2],$p[3],$p[4],$p[5],$p[6])); break;
+                case 'SRV': $p = preg_split('/\s+/', $r['value']); if(count($p) >= 4) { $target = rtrim($p[3], '.'); $rr->setRdata(Factory::Srv((int)$p[0], (int)$p[1], (int)$p[2], $target)); } break;
+            }
+            $zone->addResourceRecord($rr);
+        } catch (Exception $e) {}
+    }
+
+    $builder = new AlignedBuilder();
+    $builder->addRdataFormatter('TXT', 'specialTxtFormatter');
+    $zoneFile = $builder->build($zone);
+
+    // === PHASE 3: IP Resolution & WHOIS ===
+    sendProgress(3, $total_steps, 'Resolving IP addresses...');
+
+    // Resolve IPs for the target host (not root domain)
+    $ips = gethostbynamel($targetHost); $ip_lookup = []; $rawWhoisIps = [];
+    if ($ips) foreach ($ips as $ip) {
+        $rawIpWhois = shell_exec("whois " . escapeshellarg($ip));
+        $rawWhoisIps[$ip] = $rawIpWhois;
+        $res = '';
+        if ($rawIpWhois) {
+            foreach (explode("\n", $rawIpWhois) as $line) {
+                if (preg_match('/^(OrgName|NetName|Organization):\s*(.+)/i', $line, $m)) {
+                    $res = trim($m[0]);
+                    break;
+                }
+            }
+        }
+        $ip_lookup[$ip] = $res ?: 'N/A';
+    }
+
+    // === PHASE 4: HTTP & SSL ===
+    sendProgress(4, $total_steps, 'Fetching HTTP headers & SSL...');
+
+    // HTTP/HTML from the target host
+    $headers = [];
+    $h_out = shell_exec("curl -I -s -L --max-time 3 " . escapeshellarg("https://".$targetHost));
+    if (!$h_out) $h_out = shell_exec("curl -I -s -L --max-time 2 " . escapeshellarg("http://".$targetHost));
+    if($h_out) foreach(explode("\n", $h_out) as $line) {
+        if(strpos($line, ':')) { [$k, $v] = explode(':', $line, 2); $headers[trim($k)] = trim($v); }
+    }
+
+    $html = @file_get_contents("https://" . $targetHost, false, stream_context_create([
+        'http' => ['timeout' => 3, 'ignore_errors' => true],
+        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
+    ]));
+    if (!$html) $html = @file_get_contents("http://" . $targetHost, false, stream_context_create([
+        'http' => ['timeout' => 3, 'ignore_errors' => true]
+    ]));
+
+    // SSL from the target host
+    $rawSsl = getRawSSL($targetHost);
+
+    // === PHASE 5: Domain Registration ===
+    sendProgress(5, $total_steps, 'Looking up domain registration...');
+
+    // WHOIS/RDAP always from root domain (subdomain lookups usually fail)
+    $rawWhoisDomain = getRawWhoisDomain($rootDomain);
+    $rawRdap = getRawRdap($rootDomain);
+
+    // === PHASE 6: Analysis & Save ===
+    sendProgress(6, $total_steps, 'Analyzing results...');
+
+    $timestamp = time();
+
+    // Tech detection uses targetHost (the actual site being scanned)
+    $ssl = getSSLInfo($targetHost, $rawSsl);
+    $cms = detectCMS($targetHost, $html, $headers);
+    $infra = detectInfrastructure($headers);
+    $security = detectSecurityHeaders($headers);
+    $technology = detectTechnology($html, $headers);
+    $metadataRawFiles = [];
+    $metadata = detectMetadata($targetHost, $html, $metadataRawFiles);
+
+    // Store scans under targetHost
+    $scanPath = getScanPath($targetHost, $timestamp);
+    saveRawFiles($scanPath, $html, $headers, $rawWhoisDomain, $rawWhoisIps, $rawSsl, [
+        'records' => $dns_records,
+        'zone' => $zoneFile
+    ], $rawRdap, $metadataRawFiles);
+
+    $domainData = $rawRdap ? parseRdap($rawRdap) : [];
+    if (empty($domainData)) $domainData = parseRawWhois($rawWhoisDomain);
+
+    // Add flags for which metadata files were captured
+    if ($metadata['robots_txt'] && $metadata['robots_txt']['present']) {
+        $metadata['robots_txt']['raw_stored'] = !empty($metadataRawFiles['robots_txt']);
+    }
+    if ($metadata['sitemap'] && $metadata['sitemap']['present'] && !isset($metadata['sitemap']['urls'])) {
+        $metadata['sitemap']['raw_stored'] = !empty($metadataRawFiles['sitemap_xml']);
+    }
+    if ($metadata['security_txt'] && $metadata['security_txt']['present']) {
+        $metadata['security_txt']['raw_stored'] = !empty($metadataRawFiles['security_txt']);
+    }
+    if ($metadata['favicon'] && $metadata['favicon']['present'] && isset($metadata['favicon']['hash'])) {
+        $metadata['favicon']['raw_stored'] = !empty($metadataRawFiles['favicon']);
+    }
+
+    $result = [
+        'target_host' => $targetHost,
+        'root_domain' => $rootDomain,
+        'is_subdomain' => $isSubdomain,
+        'domain' => $domainData, 'dns_records' => $dns_records, 'zone' => $zoneFile,
+        'ip_lookup' => $ip_lookup, 'http_headers' => $headers, 'ssl' => $ssl, 'cms' => $cms,
+        'infrastructure' => $infra, 'security' => $security, 'technology' => $technology,
+        'metadata' => $metadata, 'errors' => [], 'timestamp' => $timestamp, 'raw_available' => true,
+        'plugin_version' => PERISCOPE_VERSION
+    ];
+
+    saveResponseCache($scanPath, $result);
+
+    // Save to history database using targetHost
+    if ($pdo) {
+        $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')");
+        $stmt->execute([$targetHost, $timestamp]);
+    }
+
+    return $result;
+}
+
 // --- CLI EXECUTION ---
 if (php_sapi_name() === 'cli' && !isset($_SERVER['REQUEST_METHOD'])) {
     if ($argc < 2) { echo "Usage: php engine.php <domain>\n"; exit(1); }
@@ -1256,7 +1980,7 @@ if (php_sapi_name() === 'cli' && !isset($_SERVER['REQUEST_METHOD'])) {
     $data = performLookup($domain);
     if ($pdo) {
         // Insert with data=NULL - raw files stored on disk
-        $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, NULL)");
+        $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')");
         $stmt->execute([$domain, $data['timestamp']]);
     }
     $registrar = 'N/A';
@@ -1385,7 +2109,32 @@ if ($pdo) {
         exit;
     }
     if ($action === 'delete_history') {
+        // Get domain and timestamp before deleting
+        $stmt = $pdo->prepare("SELECT domain, timestamp FROM history WHERE id = ?");
+        $stmt->execute([$_POST['id']]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        // Delete from database
         $pdo->prepare("DELETE FROM history WHERE id = ?")->execute([$_POST['id']]);
+
+        // Delete raw files folder if it exists
+        if ($row && !empty($row['domain']) && !empty($row['timestamp'])) {
+            try {
+                $scanPath = getScanPath($row['domain'], $row['timestamp']);
+                $expectedBase = getenv('HOME') . "/.periscope/scans/";
+                // SAFETY: Double-check path is within expected directory before deletion
+                if (is_dir($scanPath) && strpos(realpath($scanPath), $expectedBase) === 0) {
+                    $files = glob("$scanPath/*");
+                    foreach ($files as $file) {
+                        if (is_file($file)) unlink($file);
+                    }
+                    rmdir($scanPath);
+                }
+            } catch (Exception $e) {
+                // Silently ignore path errors - database entry already deleted
+            }
+        }
+
         echo json_encode(['success'=>true]); exit;
     }
     if ($action === 'export_history') {
@@ -1420,6 +2169,35 @@ if ($pdo) {
         }
         exit;
     }
+    if ($action === 'get_file') {
+        // Retrieve hash-based file: ?action=get_file&domain=X&hash=Y&extension=Z
+        $domain = $_GET['domain'] ?? '';
+        $hash = $_GET['hash'] ?? '';
+        $extension = $_GET['extension'] ?? '';
+
+        if (!$domain || !$hash || !$extension) {
+            header('HTTP/1.1 400 Bad Request');
+            exit('Missing parameters');
+        }
+
+        $content = getFileByHash($domain, $hash, $extension);
+        if ($content) {
+            $mimeTypes = [
+                'ico' => 'image/x-icon',
+                'png' => 'image/png',
+                'jpg' => 'image/jpeg',
+                'jpeg' => 'image/jpeg',
+                'gif' => 'image/gif',
+                'webp' => 'image/webp'
+            ];
+            header('Content-Type: ' . ($mimeTypes[$extension] ?? 'application/octet-stream'));
+            header('Cache-Control: public, max-age=31536000'); // 1 year cache
+            echo $content;
+            exit;
+        }
+        header('HTTP/1.1 404 Not Found');
+        exit('File not found');
+    }
     if ($action === 'get_raw') {
         // Retrieve raw file: ?action=get_raw&domain=example.com&timestamp=1737465600&type=whois_domain
         $domain = $_GET['domain'] ?? '';
@@ -1442,6 +2220,23 @@ if ($pdo) {
             $file = "$path/dns.json";
         } elseif ($type === 'rdap') {
             $file = "$path/rdap.json";
+        } elseif ($type === 'robots_txt') {
+            $file = "$path/robots.txt";
+        } elseif ($type === 'sitemap_xml') {
+            $file = "$path/sitemap.xml";
+        } elseif ($type === 'security_txt') {
+            $file = "$path/security.txt";
+        } elseif ($type === 'favicon') {
+            $file = "$path/favicon.ico";
+            if (file_exists($file)) {
+                header('Content-Type: image/x-icon');
+                echo file_get_contents($file);
+                exit;
+            } else {
+                header('HTTP/1.1 404 Not Found');
+                echo 'No favicon stored for this scan.';
+                exit;
+            }
         } else {
             echo json_encode(['error' => 'Invalid type']);
             exit;
@@ -1488,6 +2283,37 @@ if (isset($_GET['whois'])) {
     exit;
 }
 if (isset($_GET['raw_domain'])) { echo json_encode(getWhois($_GET['raw_domain']), JSON_PRETTY_PRINT); exit; }
+
+// --- SSE SCAN ENDPOINT ---
+if (isset($_GET['scan'])) {
+    $domain = trim($_GET['scan']);
+    if (empty($domain)) {
+        header('Content-Type: application/json');
+        echo json_encode(['error' => 'No domain provided']);
+        exit;
+    }
+
+    // Set SSE headers
+    header('Content-Type: text/event-stream');
+    header('Cache-Control: no-cache');
+    header('X-Accel-Buffering: no');
+    header('Connection: keep-alive');
+
+    // Disable output buffering
+    @ini_set('output_buffering', 'off');
+    @ini_set('zlib.output_compression', false);
+    while (ob_get_level()) ob_end_flush();
+    ob_implicit_flush(true);
+
+    try {
+        $result = performLookupWithProgress($domain);
+        sendComplete($result);
+    } catch (Exception $e) {
+        sendError($e->getMessage());
+    }
+    exit;
+}
+
 if(isset($_GET['domain'])) { echo json_encode(performLookup($_GET['domain'])); } else { echo json_encode(['error' => 'No domain provided']); }
 ?>
 EOF
@@ -1529,6 +2355,18 @@ ROUTER_EOF
 
 # --- Launch Logic ---
 
+LAUNCH_PID=""
+
+cleanup() {
+    if [ -n "$LAUNCH_PID" ]; then
+        kill $LAUNCH_PID 2>/dev/null
+    fi
+    echo ""
+    exit 0
+}
+
+trap cleanup INT TERM
+
 launch_when_ready() {
     # Wait for the server to be responsive before opening the browser
     # Loop for max 5 seconds (50 * 0.1s)
@@ -1559,6 +2397,7 @@ fi
 
 # Run launch logic in background so we can start PHP immediately
 launch_when_ready &
+LAUNCH_PID=$!
 
 if [ "$LOCAL_MODE" = true ]; then
     echo -e "${GREEN}🔗 Local UI:  $URL${NC}"
@@ -1571,3 +2410,6 @@ echo -e "${GREEN}📂 Database:  $DB_FILE${NC}"
 echo ""
 
 PERISCOPE_DB="$DB_FILE" php -S 127.0.0.1:$PORT "$ROUTER_FILE"
+
+# Clean exit
+cleanup

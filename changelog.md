@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.0] - 2026-01-22
+
+### Added
+
+- **Real-time Scan Progress** - Implemented Server-Sent Events (SSE) to stream scan status updates and a visual progress bar to the UI.
+- **Subdomain Intelligence** - Smart differentiation between root domains and subdomains. Now scans specific subdomain records while preserving root-level context (Email, Auth, etc.).
+- **WordPress Deep Dive** - Automatically detects installed plugins, Multisite configurations, and Multi-tenant setups (WP Freighter).
+- **Visual Metadata Previews** - View Open Graph images, Twitter Cards, and Favicons directly in the app. Images are downloaded and stored locally for privacy.
+- **Input Normalization** - Smart parsing allows pasting full URLs (e.g., `https://example.com/page`), automatically stripping protocols and paths.
+- **Raw Metadata Viewers** - Direct previews for stored `robots.txt`, `sitemap.xml`, and `security.txt` files.
+
+### Changed
+
+- **DNS Engine** - Optimized resolution logic to handle wildcard records on root domains more gracefully.
+- **Favicon Detection** - Enhanced algorithm to find the highest resolution icons, including `apple-touch-icon`.
+- **Storage** - Implemented content-addressable storage (hashing) for captured images to reduce duplication.
+
 ## [1.1.0] - 2026-01-21
 
 ### Added

@@ -162,6 +162,17 @@
                         </ul>
                     </div>
                 </div>
+                <!-- Progress Bar -->
+                <div v-if="loading" class="mt-4 animate-fade-in-up">
+                    <div class="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
+                        <span>{{ progress.message }}</span>
+                        <span>{{ progress.step }}/{{ progress.total }}</span>
+                    </div>
+                    <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                        <div class="bg-gradient-to-r from-cyan-500 to-sky-500 h-2 rounded-full transition-all duration-300 ease-out"
+                             :style="{ width: progress.percent + '%' }"></div>
+                    </div>
+                </div>
                 <div v-if="response.errors.length > 0" class="mt-4 space-y-2 animate-fade-in-up">
                     <div v-for="error in response.errors"
                         class="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded-md shadow-sm">
@@ -218,6 +229,19 @@
                     </button>
                 </div>
 
+                <!-- Subdomain indicator -->
+                <div v-if="response.is_subdomain" class="mb-6 flex justify-center">
+                    <div class="inline-flex items-center gap-3 px-4 py-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 text-sm">
+                        <span class="text-indigo-600 dark:text-indigo-400">
+                            <span class="mdi mdi-subdirectory-arrow-right mr-1"></span>
+                            Scanning subdomain
+                        </span>
+                        <span class="font-mono font-medium text-indigo-700 dark:text-indigo-300">{{ response.target_host }}</span>
+                        <span class="text-indigo-400 dark:text-indigo-500">of</span>
+                        <span class="font-mono text-indigo-600 dark:text-indigo-400">{{ response.root_domain }}</span>
+                    </div>
+                </div>
+
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                     <div v-if="response.ssl && response.ssl.valid"
                         class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -252,14 +276,36 @@
                         </div>
                     </div>
 
-                    <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                    <div v-if="response.cms || response.raw_available" class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                         <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
                             <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
                                 <span class="mdi mdi-application-cog mr-1"></span> Platform
                             </h3>
                         </div>
                         <div class="p-5 flex items-center justify-between">
-                            <span class="text-lg font-medium text-slate-900 dark:text-slate-200">{{ response.cms ? response.cms.name : (response.raw_available ? 'HTML' : 'Unknown') }}</span>
+                            <span class="flex items-center gap-2">
+                                <span class="text-lg font-medium text-slate-900 dark:text-slate-200">{{ response.cms ? response.cms.name : 'HTML' }}</span>
+                                <button v-if="response.cms && response.cms.name === 'WordPress' && response.cms.plugins && response.cms.plugins.length > 0"
+                                    @click="showPluginsModal = true"
+                                    class="p-1 text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors"
+                                    :title="response.cms.plugins.length + ' plugins detected'">
+                                    <span class="mdi mdi-puzzle-outline"></span>
+                                </button>
+                                <a v-if="response.cms && response.cms.multisite"
+                                    href="https://developer.wordpress.org/advanced-administration/multisite/"
+                                    target="_blank"
+                                    class="text-xs px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
+                                    title="WordPress Multisite detected">
+                                    Multisite
+                                </a>
+                                <a v-if="response.cms && response.cms.multitenancy"
+                                    href="https://wpfreighter.com"
+                                    target="_blank"
+                                    class="text-xs px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+                                    title="WP Freighter Multi-tenant detected">
+                                    Multi-tenant
+                                </a>
+                            </span>
                             <span v-if="response.cms && response.cms.version" class="font-mono text-sm px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
                                 v{{ response.cms.version }}
                             </span>
@@ -387,7 +433,12 @@
                         </div>
                         <div class="p-4 space-y-2 text-xs">
                             <div class="flex items-center justify-between">
-                                <span class="text-slate-600 dark:text-slate-400">robots.txt</span>
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">robots.txt</span>
+                                    <button v-if="response.metadata.robots_txt && response.metadata.robots_txt.raw_stored" @click="showRawPreview('robots_txt', 'robots.txt')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
                                 <span v-if="response.metadata.robots_txt && response.metadata.robots_txt.present" class="text-emerald-600 dark:text-emerald-400">
                                     <span class="mdi mdi-check-circle"></span>
                                     <span v-if="response.metadata.robots_txt.disallow_count > 0" class="ml-1 text-slate-500">({{ response.metadata.robots_txt.disallow_count }} rules)</span>
@@ -395,27 +446,52 @@
                                 <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
                             </div>
                             <div class="flex items-center justify-between">
-                                <span class="text-slate-600 dark:text-slate-400">sitemap.xml</span>
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">sitemap.xml</span>
+                                    <button v-if="response.metadata.sitemap && response.metadata.sitemap.raw_stored" @click="showRawPreview('sitemap_xml', 'sitemap.xml')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
                                 <span v-if="response.metadata.sitemap && response.metadata.sitemap.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
                                 <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
                             </div>
                             <div class="flex items-center justify-between">
-                                <span class="text-slate-600 dark:text-slate-400">security.txt</span>
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">security.txt</span>
+                                    <button v-if="response.metadata.security_txt && response.metadata.security_txt.raw_stored" @click="showRawPreview('security_txt', 'security.txt')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
                                 <span v-if="response.metadata.security_txt && response.metadata.security_txt.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
                                 <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
                             </div>
                             <div class="flex items-center justify-between">
-                                <span class="text-slate-600 dark:text-slate-400">Open Graph</span>
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">Open Graph</span>
+                                    <button v-if="response.metadata.meta_tags && response.metadata.meta_tags.open_graph" @click="showOgPreview = true" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
                                 <span v-if="response.metadata.meta_tags && response.metadata.meta_tags.open_graph" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
                                 <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
                             </div>
                             <div class="flex items-center justify-between">
-                                <span class="text-slate-600 dark:text-slate-400">Twitter Card</span>
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">Twitter Card</span>
+                                    <button v-if="response.metadata.meta_tags && response.metadata.meta_tags.twitter" @click="showTwitterPreview = true" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
                                 <span v-if="response.metadata.meta_tags && response.metadata.meta_tags.twitter" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
                                 <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
                             </div>
                             <div class="flex items-center justify-between">
-                                <span class="text-slate-600 dark:text-slate-400">Favicon</span>
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">Favicon</span>
+                                    <button v-if="response.metadata.favicon && response.metadata.favicon.raw_stored" @click="showFaviconPreview = true" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
                                 <span v-if="response.metadata.favicon && response.metadata.favicon.present" class="text-emerald-600 dark:text-emerald-400">
                                     <span class="mdi mdi-check-circle"></span>
                                     <span v-if="response.metadata.favicon.hash" class="ml-1 font-mono text-slate-500">{{ response.metadata.favicon.hash.substring(0, 8) }}...</span>
@@ -432,9 +508,13 @@
                             class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                             <div
                                 class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-950/30">
-                                <h3
-                                    class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
-                                    Target Status</h3>
+                                <div>
+                                    <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
+                                        Domain Registration</h3>
+                                    <p v-if="response.is_subdomain" class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                        Root: {{ response.root_domain }}
+                                    </p>
+                                </div>
                                 <button v-if="response.raw_available" @click="showRawWhois()"
                                     class="text-xs text-cyan-600 dark:text-cyan-400 hover:underline">View Raw</button>
                             </div>
@@ -467,8 +547,8 @@
                                                     class="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span><span
                                                     class="font-mono text-sm font-bold text-slate-700 dark:text-slate-200">{{
                                                     ip }}</span></div>
-                                            <button @click="runWhois(ip)"
-                                                class="text-xs px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">Run WHOIS</button>
+                                            <button @click="viewWhois(ip)"
+                                                class="text-xs px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">View WHOIS</button>
                                         </div>
                                         <div class="space-y-1">
                                             <div v-for="row in rows.split('\n')" class="grid grid-cols-3 gap-2 text-xs">
@@ -582,9 +662,9 @@
                 class="px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-cyan-50 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-2">
                 <span class="mdi mdi-dns w-4"></span> Dig {{ contextMenu.value }}
             </div>
-            <div v-if="isIp(contextMenu.value)" @click="runWhois(contextMenu.value)"
+            <div v-if="isIp(contextMenu.value)" @click="viewWhois(contextMenu.value)"
                 class="px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-cyan-50 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-2">
-                <span class="mdi mdi-card-account-details w-4"></span> Whois {{ contextMenu.value }}
+                <span class="mdi mdi-card-account-details w-4"></span> View Whois {{ contextMenu.value }}
             </div>
             <div @click="copyToClipboard(contextMenu.value)"
                 class="px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-cyan-50 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-2 border-t border-slate-100 dark:border-slate-700 mt-1">
@@ -774,6 +854,23 @@
                                 </div>
                             </div>
                         </div>
+                        <div v-if="localMode" class="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
+                            <h4 class="text-sm font-semibold text-slate-900 dark:text-white uppercase tracking-wider mb-4">CLI Usage</h4>
+                            <div class="space-y-3 text-sm">
+                                <div>
+                                    <p class="text-slate-500 dark:text-slate-400 mb-1">Scan a domain</p>
+                                    <code class="block bg-slate-100 dark:bg-slate-800 px-3 py-2 rounded font-mono text-xs text-slate-700 dark:text-slate-300">php ~/.periscope/engine.php example.com</code>
+                                </div>
+                                <div>
+                                    <p class="text-slate-500 dark:text-slate-400 mb-1">Start local server</p>
+                                    <code class="block bg-slate-100 dark:bg-slate-800 px-3 py-2 rounded font-mono text-xs text-slate-700 dark:text-slate-300">curl -sL https://periscope.run/boot.sh | bash</code>
+                                </div>
+                                <div>
+                                    <p class="text-slate-500 dark:text-slate-400 mb-1">Use local UI during development</p>
+                                    <code class="block bg-slate-100 dark:bg-slate-800 px-3 py-2 rounded font-mono text-xs text-slate-700 dark:text-slate-300">./boot.sh --local</code>
+                                </div>
+                            </div>
+                        </div>
                         <div v-if="bridgeHasDb" class="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
                             <h4 class="text-sm font-semibold text-slate-900 dark:text-white uppercase tracking-wider mb-4">Database</h4>
                             <div class="space-y-2 text-sm">
@@ -816,6 +913,192 @@
             </div>
         </div>
 
+        <!-- Open Graph Preview Modal -->
+        <div v-if="showOgPreview && response.metadata && response.metadata.meta_tags && response.metadata.meta_tags.open_graph" class="fixed inset-0 z-50 overflow-y-auto">
+            <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+                <div class="fixed inset-0 bg-slate-900/75 transition-opacity" @click="showOgPreview = false"></div>
+                <div class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full border border-slate-200 dark:border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-950">
+                        <h3 class="text-lg font-medium text-slate-900 dark:text-white">Open Graph Preview</h3>
+                        <button @click="showOgPreview = false" class="text-slate-400 hover:text-slate-500"><span class="mdi mdi-close"></span></button>
+                    </div>
+                    <div class="p-6">
+                        <!-- Social Card Preview -->
+                        <div class="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden bg-white dark:bg-slate-800 shadow-sm">
+                            <!-- OG Image -->
+                            <div v-if="response.metadata.meta_tags.open_graph.image" class="aspect-[1.91/1] bg-slate-100 dark:bg-slate-900 overflow-hidden">
+                                <img :src="response.metadata.meta_tags.open_graph.image_hash ? getUrl(`action=get_file&domain=${encodeURIComponent(domain)}&hash=${response.metadata.meta_tags.open_graph.image_hash}&extension=${response.metadata.meta_tags.open_graph.image_extension}`) : response.metadata.meta_tags.open_graph.image"
+                                     :alt="response.metadata.meta_tags.open_graph.title || 'Preview'"
+                                     class="w-full h-full object-cover"
+                                     @error="$event.target.parentElement.innerHTML = '<div class=\'flex items-center justify-center h-full text-slate-400\'><span class=\'mdi mdi-image-off text-4xl\'></span></div>'">
+                            </div>
+                            <div v-else class="aspect-[1.91/1] bg-slate-100 dark:bg-slate-900 flex items-center justify-center">
+                                <span class="mdi mdi-image-off text-4xl text-slate-300 dark:text-slate-600"></span>
+                            </div>
+                            <!-- OG Content -->
+                            <div class="p-4">
+                                <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">{{ domain }}</p>
+                                <h4 class="font-semibold text-slate-900 dark:text-white text-base leading-tight mb-1">
+                                    {{ response.metadata.meta_tags.open_graph.title || response.metadata.meta_tags.basic?.title || 'No title' }}
+                                </h4>
+                                <p v-if="response.metadata.meta_tags.open_graph.description" class="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">
+                                    {{ response.metadata.meta_tags.open_graph.description }}
+                                </p>
+                            </div>
+                        </div>
+                        <!-- OG Data Details -->
+                        <div class="mt-4 space-y-2 text-xs">
+                            <div v-if="response.metadata.meta_tags.open_graph.type" class="flex justify-between">
+                                <span class="text-slate-500 dark:text-slate-400">og:type</span>
+                                <span class="font-mono text-slate-700 dark:text-slate-300">{{ response.metadata.meta_tags.open_graph.type }}</span>
+                            </div>
+                            <div v-if="response.metadata.meta_tags.open_graph.image" class="flex justify-between gap-2">
+                                <span class="text-slate-500 dark:text-slate-400 shrink-0">og:image</span>
+                                <span class="font-mono text-slate-700 dark:text-slate-300 truncate text-right">{{ response.metadata.meta_tags.open_graph.image }}</span>
+                            </div>
+                            <div v-if="response.metadata.meta_tags.open_graph.image_hash" class="flex justify-between gap-2">
+                                <span class="text-slate-500 dark:text-slate-400 shrink-0">Stored</span>
+                                <span class="font-mono text-slate-700 dark:text-slate-300">{{ response.metadata.meta_tags.open_graph.image_extension?.toUpperCase() }} · {{ formatBytes(response.metadata.meta_tags.open_graph.image_size) }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Twitter Card Preview Modal -->
+        <div v-if="showTwitterPreview && response.metadata && response.metadata.meta_tags && response.metadata.meta_tags.twitter" class="fixed inset-0 z-50 overflow-y-auto">
+            <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+                <div class="fixed inset-0 bg-slate-900/75 transition-opacity" @click="showTwitterPreview = false"></div>
+                <div class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full border border-slate-200 dark:border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-950">
+                        <h3 class="text-lg font-medium text-slate-900 dark:text-white">Twitter Card Preview</h3>
+                        <button @click="showTwitterPreview = false" class="text-slate-400 hover:text-slate-500"><span class="mdi mdi-close"></span></button>
+                    </div>
+                    <div class="p-6">
+                        <!-- Twitter Card Preview -->
+                        <div class="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden bg-white dark:bg-slate-800 shadow-sm">
+                            <!-- Twitter Image (uses OG image as fallback) -->
+                            <div v-if="response.metadata.meta_tags.twitter?.image || response.metadata.meta_tags.open_graph?.image" class="aspect-[1.91/1] bg-slate-100 dark:bg-slate-900 overflow-hidden">
+                                <img :src="response.metadata.meta_tags.twitter?.image_hash ? getUrl(`action=get_file&domain=${encodeURIComponent(domain)}&hash=${response.metadata.meta_tags.twitter.image_hash}&extension=${response.metadata.meta_tags.twitter.image_extension}`) : (response.metadata.meta_tags.open_graph?.image_hash ? getUrl(`action=get_file&domain=${encodeURIComponent(domain)}&hash=${response.metadata.meta_tags.open_graph.image_hash}&extension=${response.metadata.meta_tags.open_graph.image_extension}`) : (response.metadata.meta_tags.twitter?.image || response.metadata.meta_tags.open_graph?.image))"
+                                     :alt="response.metadata.meta_tags.twitter.title || 'Preview'"
+                                     class="w-full h-full object-cover"
+                                     @error="$event.target.parentElement.innerHTML = '<div class=\'flex items-center justify-center h-full text-slate-400\'><span class=\'mdi mdi-image-off text-4xl\'></span></div>'">
+                            </div>
+                            <div v-else class="aspect-[1.91/1] bg-slate-100 dark:bg-slate-900 flex items-center justify-center">
+                                <span class="mdi mdi-image-off text-4xl text-slate-300 dark:text-slate-600"></span>
+                            </div>
+                            <!-- Twitter Content -->
+                            <div class="p-3">
+                                <p class="text-xs text-slate-500 dark:text-slate-400 mb-0.5">{{ domain }}</p>
+                                <h4 class="font-normal text-slate-900 dark:text-white text-sm leading-tight">
+                                    {{ response.metadata.meta_tags.twitter.title || response.metadata.meta_tags.open_graph?.title || response.metadata.meta_tags.basic?.title || 'No title' }}
+                                </h4>
+                            </div>
+                        </div>
+                        <!-- Twitter Data Details -->
+                        <div class="mt-4 space-y-2 text-xs">
+                            <div v-if="response.metadata.meta_tags.twitter.card" class="flex justify-between">
+                                <span class="text-slate-500 dark:text-slate-400">twitter:card</span>
+                                <span class="font-mono text-slate-700 dark:text-slate-300">{{ response.metadata.meta_tags.twitter.card }}</span>
+                            </div>
+                            <div v-if="response.metadata.meta_tags.twitter.site" class="flex justify-between">
+                                <span class="text-slate-500 dark:text-slate-400">twitter:site</span>
+                                <span class="font-mono text-slate-700 dark:text-slate-300">{{ response.metadata.meta_tags.twitter.site }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Favicon Preview Modal -->
+        <div v-if="showFaviconPreview && response.metadata && response.metadata.favicon && response.metadata.favicon.present" class="fixed inset-0 z-50 overflow-y-auto">
+            <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+                <div class="fixed inset-0 bg-slate-900/75 transition-opacity" @click="showFaviconPreview = false"></div>
+                <div class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-sm sm:w-full border border-slate-200 dark:border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-950">
+                        <h3 class="text-lg font-medium text-slate-900 dark:text-white">Favicon Preview</h3>
+                        <button @click="showFaviconPreview = false" class="text-slate-400 hover:text-slate-500"><span class="mdi mdi-close"></span></button>
+                    </div>
+                    <div class="p-6">
+                        <div class="flex flex-col items-center gap-4">
+                            <!-- Favicon at multiple sizes -->
+                            <div class="flex items-end gap-6">
+                                <div class="text-center">
+                                    <img :src="response.metadata.favicon.hash && response.metadata.favicon.extension ? getUrl(`action=get_file&domain=${encodeURIComponent(domain)}&hash=${response.metadata.favicon.hash}&extension=${response.metadata.favicon.extension}`) : getUrl(`action=get_raw&domain=${encodeURIComponent(domain)}&timestamp=${response.timestamp}&type=favicon`)"
+                                         alt="Favicon" class="w-4 h-4 mx-auto mb-1"
+                                         @error="$event.target.style.display='none'">
+                                    <span class="text-xs text-slate-500">16px</span>
+                                </div>
+                                <div class="text-center">
+                                    <img :src="response.metadata.favicon.hash && response.metadata.favicon.extension ? getUrl(`action=get_file&domain=${encodeURIComponent(domain)}&hash=${response.metadata.favicon.hash}&extension=${response.metadata.favicon.extension}`) : getUrl(`action=get_raw&domain=${encodeURIComponent(domain)}&timestamp=${response.timestamp}&type=favicon`)"
+                                         alt="Favicon" class="w-8 h-8 mx-auto mb-1"
+                                         @error="$event.target.style.display='none'">
+                                    <span class="text-xs text-slate-500">32px</span>
+                                </div>
+                                <div class="text-center">
+                                    <img :src="response.metadata.favicon.hash && response.metadata.favicon.extension ? getUrl(`action=get_file&domain=${encodeURIComponent(domain)}&hash=${response.metadata.favicon.hash}&extension=${response.metadata.favicon.extension}`) : getUrl(`action=get_raw&domain=${encodeURIComponent(domain)}&timestamp=${response.timestamp}&type=favicon`)"
+                                         alt="Favicon" class="w-16 h-16 mx-auto mb-1"
+                                         @error="$event.target.style.display='none'">
+                                    <span class="text-xs text-slate-500">64px</span>
+                                </div>
+                            </div>
+                            <!-- Favicon details -->
+                            <div class="w-full mt-4 space-y-2 text-xs border-t border-slate-200 dark:border-slate-700 pt-4">
+                                <div v-if="response.metadata.favicon.source" class="flex justify-between">
+                                    <span class="text-slate-500 dark:text-slate-400">Source</span>
+                                    <span class="font-mono text-slate-700 dark:text-slate-300">{{ response.metadata.favicon.source }}</span>
+                                </div>
+                                <div v-if="response.metadata.favicon.extension" class="flex justify-between">
+                                    <span class="text-slate-500 dark:text-slate-400">Format</span>
+                                    <span class="font-mono text-slate-700 dark:text-slate-300 uppercase">{{ response.metadata.favicon.extension }}</span>
+                                </div>
+                                <div v-if="response.metadata.favicon.hash" class="flex justify-between">
+                                    <span class="text-slate-500 dark:text-slate-400">MD5 Hash</span>
+                                    <span class="font-mono text-slate-700 dark:text-slate-300">{{ response.metadata.favicon.hash }}</span>
+                                </div>
+                                <div v-if="response.metadata.favicon.size" class="flex justify-between">
+                                    <span class="text-slate-500 dark:text-slate-400">Size</span>
+                                    <span class="font-mono text-slate-700 dark:text-slate-300">{{ formatBytes(response.metadata.favicon.size) }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WordPress Plugins Modal -->
+        <div v-if="showPluginsModal && response.cms && response.cms.plugins && response.cms.plugins.length > 0" class="fixed inset-0 z-50 overflow-y-auto">
+            <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+                <div class="fixed inset-0 bg-slate-900/75 transition-opacity" @click="showPluginsModal = false"></div>
+                <div class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md sm:w-full border border-slate-200 dark:border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-950">
+                        <h3 class="text-lg font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                            <span class="mdi mdi-puzzle-outline text-cyan-600 dark:text-cyan-400"></span>
+                            WordPress Plugins
+                        </h3>
+                        <button @click="showPluginsModal = false" class="text-slate-400 hover:text-slate-500"><span class="mdi mdi-close"></span></button>
+                    </div>
+                    <div class="p-4 max-h-[60vh] overflow-y-auto custom-scroll">
+                        <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">{{ response.cms.plugins.length }} plugin{{ response.cms.plugins.length !== 1 ? 's' : '' }} detected from HTML source</p>
+                        <ul class="space-y-2">
+                            <li v-for="plugin in response.cms.plugins" :key="plugin" class="flex items-center gap-3 p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                                <span class="mdi mdi-puzzle text-slate-400 dark:text-slate-500"></span>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-sm font-medium text-slate-900 dark:text-slate-200 truncate" :title="getPluginName(plugin) || plugin">
+                                        {{ getPluginName(plugin) || plugin }}
+                                    </p>
+                                    <p v-if="getPluginName(plugin)" class="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">{{ plugin }}</p>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div v-if="snackbar.show" class="fixed bottom-4 right-4 z-50 animate-slide-in-right">
             <div
                 class="bg-slate-800 dark:bg-cyan-500 text-white dark:text-slate-900 px-6 py-3 rounded-lg shadow-lg flex items-center gap-4 font-medium">
@@ -839,6 +1122,7 @@
                     domain: "",
                     loading: false,
                     loadingText: "Scanning...",
+                    progress: { step: 0, total: 6, percent: 0, message: '' },
                     localMode: false,
                     bridgeHasDb: false,
                     dbInfo: { path: '', size: 0, scanCount: 0 },
@@ -853,7 +1137,11 @@
                     selectedIndex: -1,
                     selectedHistoryIndex: -1,
                     showHelpModal: false,
-                    version: '1.1',
+                    showOgPreview: false,
+                    showTwitterPreview: false,
+                    showFaviconPreview: false,
+                    showPluginsModal: false,
+                    version: '1.2',
                     pendingDeepLink: null,
                 }
             },
@@ -913,8 +1201,8 @@
                 // Store deep-link domain for later (after bridge connects)
                 const domainParam = urlParams.get('domain');
                 if (domainParam) {
-                    this.domain = domainParam;
-                    this.pendingDeepLink = domainParam;
+                    this.domain = this.normalizeDomain(domainParam);
+                    this.pendingDeepLink = this.domain;
                 }
 
                 if (urlParams.has('local')) {
@@ -927,6 +1215,10 @@
                         this.showHistoryModal = false;
                         this.showVersionsModal = false;
                         this.showHelpModal = false;
+                        this.showOgPreview = false;
+                        this.showTwitterPreview = false;
+                        this.showFaviconPreview = false;
+                        this.showPluginsModal = false;
                         this.dialog.show = false;
                         this.contextMenu.show = false;
                         this.showAutocomplete = false;
@@ -1014,6 +1306,97 @@
                     const i = Math.floor(Math.log(bytes) / Math.log(k));
                     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
                 },
+                getPluginName(slug) {
+                    const knownPlugins = {
+                        'gravityforms': 'Gravity Forms',
+                        'advanced-custom-fields': 'Advanced Custom Fields',
+                        'advanced-custom-fields-pro': 'Advanced Custom Fields Pro',
+                        'akismet': 'Akismet Anti-Spam',
+                        'all-in-one-seo-pack': 'All in One SEO',
+                        'all-in-one-wp-migration': 'All-in-One WP Migration',
+                        'autoptimize': 'Autoptimize',
+                        'bbpress': 'bbPress',
+                        'beaver-builder-lite-version': 'Beaver Builder',
+                        'better-wp-security': 'iThemes Security',
+                        'broken-link-checker': 'Broken Link Checker',
+                        'buddypress': 'BuddyPress',
+                        'classic-editor': 'Classic Editor',
+                        'contact-form-7': 'Contact Form 7',
+                        'cookie-law-info': 'GDPR Cookie Consent',
+                        'custom-post-type-ui': 'Custom Post Type UI',
+                        'disable-comments': 'Disable Comments',
+                        'duplicate-post': 'Yoast Duplicate Post',
+                        'duplicator': 'Duplicator',
+                        'easy-digital-downloads': 'Easy Digital Downloads',
+                        'elementor': 'Elementor',
+                        'elementor-pro': 'Elementor Pro',
+                        'envira-gallery-lite': 'Envira Gallery',
+                        'essential-addons-for-elementor-lite': 'Essential Addons for Elementor',
+                        'ewww-image-optimizer': 'EWWW Image Optimizer',
+                        'favicon-by-realfavicongenerator': 'Favicon by RealFaviconGenerator',
+                        'flamingo': 'Flamingo',
+                        'google-analytics-for-wordpress': 'MonsterInsights',
+                        'google-sitemap-generator': 'Google XML Sitemaps',
+                        'gtranslate': 'GTranslate',
+                        'header-footer-elementor': 'Elementor Header & Footer Builder',
+                        'hello-dolly': 'Hello Dolly',
+                        'instagram-feed': 'Smash Balloon Instagram Feed',
+                        'jetpack': 'Jetpack',
+                        'limit-login-attempts-reloaded': 'Limit Login Attempts Reloaded',
+                        'litespeed-cache': 'LiteSpeed Cache',
+                        'mailchimp-for-wp': 'MC4WP: Mailchimp for WordPress',
+                        'mailpoet': 'MailPoet',
+                        'megamenu': 'Max Mega Menu',
+                        'members': 'Members',
+                        'ninja-forms': 'Ninja Forms',
+                        'optinmonster': 'OptinMonster',
+                        'really-simple-ssl': 'Really Simple SSL',
+                        'redirection': 'Redirection',
+                        'regenerate-thumbnails': 'Regenerate Thumbnails',
+                        'restrict-content': 'Restrict Content',
+                        'revslider': 'Slider Revolution',
+                        'safe-svg': 'Safe SVG',
+                        'sg-cachepress': 'SiteGround Optimizer',
+                        'shortpixel-image-optimiser': 'ShortPixel Image Optimizer',
+                        'simple-custom-css': 'Simple Custom CSS',
+                        'siteguard': 'SiteGuard WP Plugin',
+                        'slideshow-gallery': 'Slideshow Gallery',
+                        'smart-slider-3': 'Smart Slider 3',
+                        'smtp-mailer': 'SMTP Mailer',
+                        'so-widgets-bundle': 'SiteOrigin Widgets Bundle',
+                        'tablepress': 'TablePress',
+                        'the-events-calendar': 'The Events Calendar',
+                        'tinymce-advanced': 'Advanced Editor Tools',
+                        'translatepress-multilingual': 'TranslatePress',
+                        'updraftplus': 'UpdraftPlus',
+                        'user-role-editor': 'User Role Editor',
+                        'w3-total-cache': 'W3 Total Cache',
+                        'webp-converter-for-media': 'WebP Converter for Media',
+                        'widget-importer-exporter': 'Widget Importer & Exporter',
+                        'woocommerce': 'WooCommerce',
+                        'woocommerce-gateway-stripe': 'WooCommerce Stripe Gateway',
+                        'woocommerce-payments': 'WooPayments',
+                        'woocommerce-pdf-invoices-packing-slips': 'PDF Invoices & Packing Slips for WooCommerce',
+                        'woolentor-addons': 'ShopLentor',
+                        'wordpress-importer': 'WordPress Importer',
+                        'wordpress-seo': 'Yoast SEO',
+                        'wordfence': 'Wordfence Security',
+                        'wpforms-lite': 'WPForms Lite',
+                        'wpforms': 'WPForms',
+                        'wp-fastest-cache': 'WP Fastest Cache',
+                        'wp-mail-smtp': 'WP Mail SMTP',
+                        'wp-migrate-db': 'WP Migrate DB',
+                        'wp-optimize': 'WP-Optimize',
+                        'wp-pagenavi': 'WP-PageNavi',
+                        'wp-reset': 'WP Reset',
+                        'wp-rocket': 'WP Rocket',
+                        'wp-smushit': 'Smush',
+                        'wp-statistics': 'WP Statistics',
+                        'wp-super-cache': 'WP Super Cache',
+                        'yith-woocommerce-wishlist': 'YITH WooCommerce Wishlist',
+                    };
+                    return knownPlugins[slug.toLowerCase()] || null;
+                },
                 scrollToSelected() {
                     this.$nextTick(() => {
                         const el = document.getElementById('version-item-' + this.selectedIndex);
@@ -1030,11 +1413,26 @@
                 // Core
                 handleBlur() { setTimeout(() => { this.showAutocomplete = false; }, 200); },
                 selectAutocomplete(item) { this.loadFromHistory(item); this.showAutocomplete = false; },
+                normalizeDomain(input) {
+                    if (!input) return '';
+                    // Strip protocol
+                    let domain = input.replace(/^https?:\/\//i, '');
+                    // Strip path, query string, fragment
+                    domain = domain.replace(/[/?#].*$/, '');
+                    // Strip trailing dots and whitespace
+                    domain = domain.replace(/\.+$/, '').trim();
+                    // Lowercase
+                    return domain.toLowerCase();
+                },
                 lookupDomain() {
+                    if (!this.domain) return;
+                    // Normalize input and update the field
+                    this.domain = this.normalizeDomain(this.domain);
                     if (!this.domain) return;
                     this.loading = true;
                     this.loadingText = "Scanning...";
                     this.showAutocomplete = false;
+                    this.progress = { step: 0, total: 6, percent: 0, message: 'Initializing...' };
                     this.response = { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} };
 
                     // 1. Update URL
@@ -1042,38 +1440,91 @@
                     newUrl.searchParams.set('domain', this.domain);
                     window.history.pushState({}, '', newUrl);
 
-                    fetch(this.getUrl(`domain=${encodeURIComponent(this.domain)}`))
-                        .then(async response => {
-                            // 2. Read text first (don't assume JSON)
-                            const text = await response.text();
+                    // Use EventSource for SSE progress updates
+                    const sseUrl = this.getUrl(`scan=${encodeURIComponent(this.domain)}`);
 
+                    // Check if EventSource is supported
+                    if (typeof EventSource !== 'undefined') {
+                        const eventSource = new EventSource(sseUrl);
+
+                        eventSource.onmessage = (event) => {
                             try {
-                                // 3. Try parsing JSON
-                                const data = JSON.parse(text);
-                                this.loading = false;
+                                const payload = JSON.parse(event.data);
 
-                                if (data.errors && data.errors.length > 0) {
-                                    this.response.errors = data.errors;
-                                } else {
-                                    this.response = data;
-                                    this.saveToHistory(this.domain, data);
-                                    this.getDomainVersions(this.domain);
-                                    this.$nextTick(() => { Prism.highlightAll() });
+                                if (payload.type === 'progress') {
+                                    this.progress = {
+                                        step: payload.step,
+                                        total: payload.total,
+                                        percent: payload.percent,
+                                        message: payload.message
+                                    };
+                                } else if (payload.type === 'complete') {
+                                    eventSource.close();
+                                    this.loading = false;
+                                    this.progress = { step: 0, total: 6, percent: 0, message: '' };
+
+                                    const data = payload.data;
+                                    if (data.errors && data.errors.length > 0) {
+                                        this.response.errors = data.errors;
+                                    } else {
+                                        this.response = data;
+                                        this.loadHistory();
+                                        this.getDomainVersions(this.domain);
+                                        this.$nextTick(() => { Prism.highlightAll() });
+                                    }
+                                } else if (payload.type === 'error') {
+                                    eventSource.close();
+                                    this.loading = false;
+                                    this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                                    this.response.errors.push(`<strong>Scan Error:</strong><br/>${payload.message}`);
                                 }
                             } catch (e) {
-                                // 4. JSON parse failed -> It's a PHP Fatal Error (Raw HTML)
+                                // JSON parse failed
+                                eventSource.close();
                                 this.loading = false;
-                                // Strip the "Fatal error:" prefix if you want, or just show it all
-                                // We wrap it in a clean error message
-                                this.response.errors.push(`<strong>Server Error:</strong><br/>${text}`);
+                                this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                                this.response.errors.push(`<strong>Server Error:</strong><br/>${event.data}`);
                             }
-                        })
-                        .catch(e => {
-                            // 5. Network/Fetch failures
+                        };
+
+                        eventSource.onerror = (e) => {
+                            eventSource.close();
                             this.loading = false;
+                            this.progress = { step: 0, total: 6, percent: 0, message: '' };
                             const url = this.localMode ? 'http://127.0.0.1:8989' : window.location.origin;
                             this.response.errors.push(`<strong>Network Connection Failed</strong><br/><span class="text-red-600/70 dark:text-red-300/70">Could not connect to ${url}</span><br/><button onclick="document.querySelector('#app').__vue_app__._instance.proxy.lookupDomain()" class="mt-2 text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:underline">Retry Connection</button>`);
-                        });
+                        };
+                    } else {
+                        // Fallback to regular fetch for older browsers
+                        fetch(this.getUrl(`domain=${encodeURIComponent(this.domain)}`))
+                            .then(async response => {
+                                const text = await response.text();
+                                try {
+                                    const data = JSON.parse(text);
+                                    this.loading = false;
+                                    this.progress = { step: 0, total: 6, percent: 0, message: '' };
+
+                                    if (data.errors && data.errors.length > 0) {
+                                        this.response.errors = data.errors;
+                                    } else {
+                                        this.response = data;
+                                        this.saveToHistory(this.domain, data);
+                                        this.getDomainVersions(this.domain);
+                                        this.$nextTick(() => { Prism.highlightAll() });
+                                    }
+                                } catch (e) {
+                                    this.loading = false;
+                                    this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                                    this.response.errors.push(`<strong>Server Error:</strong><br/>${text}`);
+                                }
+                            })
+                            .catch(e => {
+                                this.loading = false;
+                                this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                                const url = this.localMode ? 'http://127.0.0.1:8989' : window.location.origin;
+                                this.response.errors.push(`<strong>Network Connection Failed</strong><br/><span class="text-red-600/70 dark:text-red-300/70">Could not connect to ${url}</span><br/><button onclick="document.querySelector('#app').__vue_app__._instance.proxy.lookupDomain()" class="mt-2 text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:underline">Retry Connection</button>`);
+                            });
+                    }
                 },
 
                 // Backend Features (Dig/Whois/Raw)
@@ -1090,17 +1541,22 @@
                     this.dialog.title = `Dig: ${domain}`; this.dialog.content = 'Loading...'; this.dialog.tabs = null; this.dialog.activeTab = null; this.dialog.show = true; this.contextMenu.show = false;
                     fetch(this.getUrl(`dig=${encodeURIComponent(domain)}`)).then(r => r.text()).then(d => this.dialog.content = d || 'No results.');
                 },
-                runWhois(ip) {
+                viewWhois(ip) {
                     this.dialog.title = `Whois: ${ip}`; this.dialog.content = 'Loading...'; this.dialog.tabs = null; this.dialog.activeTab = null; this.dialog.show = true; this.contextMenu.show = false;
-                    fetch(this.getUrl(`whois=${encodeURIComponent(ip)}`)).then(r => r.text()).then(d => this.dialog.content = d || 'No results.');
+                    // Fetch stored WHOIS from scan data
+                    const baseUrl = `action=get_raw&domain=${encodeURIComponent(this.domain)}&timestamp=${this.response.timestamp}&type=whois_ip_${ip}`;
+                    fetch(this.getUrl(baseUrl)).then(r => r.text()).then(d => {
+                        this.dialog.content = (d && !d.includes('No raw data')) ? d : 'No WHOIS data stored for this IP.';
+                    });
                 },
                 showRawWhois() {
-                    this.dialog.title = `Raw Data: ${this.domain}`;
+                    const displayDomain = this.response.is_subdomain ? this.response.root_domain : this.domain;
+                    this.dialog.title = `Raw Data: ${displayDomain}`;
                     this.dialog.content = 'Loading...';
                     this.dialog.tabs = null;
                     this.dialog.activeTab = null;
                     this.dialog.show = true;
-                    
+
                     const baseUrl = `action=get_raw&domain=${encodeURIComponent(this.domain)}&timestamp=${this.response.timestamp}`;
                     Promise.all([
                         fetch(this.getUrl(`${baseUrl}&type=whois_domain`)).then(r => r.text()),
@@ -1121,6 +1577,22 @@
                             this.dialog.content = '';
                         } else {
                             this.dialog.content = 'No raw data stored for this scan.';
+                        }
+                    });
+                },
+                showRawPreview(type, title) {
+                    this.dialog.title = title;
+                    this.dialog.content = 'Loading...';
+                    this.dialog.tabs = null;
+                    this.dialog.activeTab = null;
+                    this.dialog.show = true;
+                    
+                    const url = `action=get_raw&domain=${encodeURIComponent(this.domain)}&timestamp=${this.response.timestamp}&type=${type}`;
+                    fetch(this.getUrl(url)).then(r => r.text()).then(content => {
+                        if (content && !content.includes('No raw data')) {
+                            this.dialog.content = content;
+                        } else {
+                            this.dialog.content = 'No data stored for this scan. Re-scan to capture this file.';
                         }
                     });
                 },
