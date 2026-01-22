@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.1.0] - 2026-01-21
+
+### Added
+
+- **Deep Content Analysis** - Automatically detects CMS platforms (WordPress, Shopify, Wix), JavaScript frameworks (React, Vue, Next.js), and Analytics tools.
+- **Infrastructure Detection** - Identifies hosting providers (Kinsta, Vercel, AWS) and CDNs (Cloudflare, Fastly) via HTTP header fingerprinting.
+- **SSL/TLS Inspection** - Displays certificate issuer, validity status, and a countdown to expiration.
+- **Security Header Grading** - Analyzes and scores security headers including HSTS, CSP, X-Frame-Options, and Permissions-Policy.
+- **Metadata Explorer** - Checks for the presence and content of `robots.txt`, `sitemap.xml`, `security.txt`, Open Graph tags, and calculates favicon hashes.
+- **Expanded DNS Scanning** - Added support for `CAA`, `HTTPS`, `SVCB`, and `TLSA` records, along with a vastly expanded list of common subdomains (staging, dev, admin, etc.).
+- **Raw Data Storage** - Scans now save full raw outputs (HTML, WHOIS, Headers, SSL) to the local filesystem (`~/.periscope/scans`) for forensic review.
+- **History Search & Pagination** - Added search functionality to the scan log and implemented pagination for better performance with large histories.
+- **Deep Linking** - Support for direct domain linking via URL parameters (e.g., `?domain=example.com`).
+- **Local Development Mode** - Added `--local` flag to `boot.sh` to serve the UI from the local filesystem instead of fetching from GitHub.
+
+### Changed
+
+- **Storage Architecture** - Migrated from storing full JSON blobs in SQLite to a hybrid approach: metadata in SQLite and raw scan data on the filesystem to reduce database bloat.
+- **Boot Script** - Improved browser launch logic to wait for the local PHP server to be fully responsive before opening the window.
+
 ## [1.0.0] - 2026-01-20
 
 ### Added

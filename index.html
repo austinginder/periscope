@@ -139,7 +139,7 @@
                                         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
                                     </path>
                                 </svg>
-                                {{ loading ? 'Scanning...' : 'Scan' }}
+                                {{ loading ? loadingText : 'Scan' }}
                             </button>
                         </div>
                     </div>
@@ -207,11 +207,223 @@
             </div>
 
             <div v-if="response.domain" class="animate-fade-in-up">
-                <div v-if="otherVersions.length > 0" class="mb-6 flex justify-center">
-                    <button @click="showVersionsModal = true"
-                        class="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-colors border border-cyan-200 dark:border-cyan-800/50">
-                        <span class="mdi mdi-history mr-2"></span> View History ({{ otherVersions.length }} older scans)
+                <div class="mb-6 flex justify-center items-center gap-4">
+                    <span v-if="response.timestamp" class="text-sm text-slate-500 dark:text-slate-400">
+                        <span class="mdi mdi-clock-outline mr-1"></span>
+                        {{ new Date(response.timestamp * 1000).toLocaleString() }}
+                    </span>
+                    <button v-if="otherVersions.length > 0" @click="showVersionsModal = true"
+                        class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-colors border border-cyan-200 dark:border-cyan-800/50">
+                        <span class="mdi mdi-history mr-1"></span> {{ otherVersions.length }} other scans
                     </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div v-if="response.ssl && response.ssl.valid"
+                        class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
+                                <span class="mdi mdi-lock mr-1"></span> SSL Certificate
+                            </h3>
+                        </div>
+                        <div class="p-5">
+                            <div class="grid grid-cols-3 gap-4 text-sm">
+                                <div>
+                                    <p class="text-slate-500 dark:text-slate-400 mb-1">Expires</p>
+                                    <p class="font-mono" :class="response.ssl.days_remaining < 30 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-slate-200'">
+                                        {{ response.ssl.expires }}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p class="text-slate-500 dark:text-slate-400 mb-1">Days Left</p>
+                                    <p class="font-mono text-lg font-bold" :class="{
+                                        'text-red-600 dark:text-red-400': response.ssl.days_remaining < 14,
+                                        'text-amber-600 dark:text-amber-400': response.ssl.days_remaining >= 14 && response.ssl.days_remaining < 30,
+                                        'text-emerald-600 dark:text-emerald-400': response.ssl.days_remaining >= 30
+                                    }">
+                                        {{ response.ssl.days_remaining }}
+                                    </p>
+                                </div>
+                                <div v-if="response.ssl.issuer">
+                                    <p class="text-slate-500 dark:text-slate-400 mb-1">Issuer</p>
+                                    <p class="font-mono text-slate-900 dark:text-slate-200 truncate" :title="response.ssl.issuer">{{ response.ssl.issuer }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
+                                <span class="mdi mdi-application-cog mr-1"></span> Platform
+                            </h3>
+                        </div>
+                        <div class="p-5 flex items-center justify-between">
+                            <span class="text-lg font-medium text-slate-900 dark:text-slate-200">{{ response.cms ? response.cms.name : (response.raw_available ? 'HTML' : 'Unknown') }}</span>
+                            <span v-if="response.cms && response.cms.version" class="font-mono text-sm px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                v{{ response.cms.version }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div v-if="response.infrastructure"
+                        class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
+                                <span class="mdi mdi-server mr-1"></span> Infrastructure
+                            </h3>
+                        </div>
+                        <div class="p-5">
+                            <div class="grid grid-cols-3 gap-4 text-sm">
+                                <div v-if="response.infrastructure.host">
+                                    <p class="text-slate-500 dark:text-slate-400 mb-1">Host</p>
+                                    <p class="font-medium text-slate-900 dark:text-slate-200">{{ response.infrastructure.host }}</p>
+                                </div>
+                                <div v-if="response.infrastructure.cdn">
+                                    <p class="text-slate-500 dark:text-slate-400 mb-1">CDN</p>
+                                    <p class="font-medium text-slate-900 dark:text-slate-200">{{ response.infrastructure.cdn }}</p>
+                                </div>
+                                <div v-if="response.infrastructure.server">
+                                    <p class="text-slate-500 dark:text-slate-400 mb-1">Server</p>
+                                    <p class="font-mono text-slate-900 dark:text-slate-200">{{ response.infrastructure.server }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Security, Technology, and Metadata Row -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <!-- Security Headers -->
+                    <div v-if="response.security"
+                        class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex justify-between items-center">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
+                                <span class="mdi mdi-shield-check mr-1"></span> Security Headers
+                            </h3>
+                            <span class="text-xs font-bold px-2 py-1 rounded-full" :class="{
+                                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400': response.security.score.value <= 2,
+                                'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400': response.security.score.value > 2 && response.security.score.value <= 4,
+                                'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400': response.security.score.value > 4
+                            }">{{ response.security.score.value }}/{{ response.security.score.total }}</span>
+                        </div>
+                        <div class="p-4 space-y-2 text-xs">
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">HSTS</span>
+                                <span v-if="response.security.hsts.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">CSP</span>
+                                <span v-if="response.security.csp.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">X-Frame-Options</span>
+                                <span v-if="response.security.x_frame_options.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">X-Content-Type-Options</span>
+                                <span v-if="response.security.x_content_type_options.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">Referrer-Policy</span>
+                                <span v-if="response.security.referrer_policy.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">Permissions-Policy</span>
+                                <span v-if="response.security.permissions_policy.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Technology Stack -->
+                    <div v-if="response.technology && (response.technology.frameworks.length > 0 || response.technology.analytics.length > 0 || response.technology.ecommerce.length > 0 || response.technology.widgets.length > 0)"
+                        class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
+                                <span class="mdi mdi-code-tags mr-1"></span> Technology
+                            </h3>
+                        </div>
+                        <div class="p-4 space-y-3 text-xs">
+                            <div v-if="response.technology.frameworks.length > 0">
+                                <p class="text-slate-500 dark:text-slate-400 mb-1 font-medium">Frameworks</p>
+                                <div class="flex flex-wrap gap-1">
+                                    <span v-for="fw in response.technology.frameworks" :key="fw" class="px-2 py-0.5 bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-300 rounded">{{ fw }}</span>
+                                </div>
+                            </div>
+                            <div v-if="response.technology.analytics.length > 0">
+                                <p class="text-slate-500 dark:text-slate-400 mb-1 font-medium">Analytics</p>
+                                <div class="flex flex-wrap gap-1">
+                                    <span v-for="a in response.technology.analytics" :key="a.name" class="px-2 py-0.5 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 rounded">{{ a.name }}<span v-if="a.id" class="opacity-60 ml-1">({{ a.id }})</span></span>
+                                </div>
+                            </div>
+                            <div v-if="response.technology.ecommerce.length > 0">
+                                <p class="text-slate-500 dark:text-slate-400 mb-1 font-medium">E-commerce</p>
+                                <div class="flex flex-wrap gap-1">
+                                    <span v-for="ec in response.technology.ecommerce" :key="ec" class="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 rounded">{{ ec }}</span>
+                                </div>
+                            </div>
+                            <div v-if="response.technology.widgets.length > 0">
+                                <p class="text-slate-500 dark:text-slate-400 mb-1 font-medium">Widgets</p>
+                                <div class="flex flex-wrap gap-1">
+                                    <span v-for="w in response.technology.widgets" :key="w" class="px-2 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 rounded">{{ w }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Metadata -->
+                    <div v-if="response.metadata"
+                        class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
+                                <span class="mdi mdi-file-document-outline mr-1"></span> Metadata
+                            </h3>
+                        </div>
+                        <div class="p-4 space-y-2 text-xs">
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">robots.txt</span>
+                                <span v-if="response.metadata.robots_txt && response.metadata.robots_txt.present" class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span v-if="response.metadata.robots_txt.disallow_count > 0" class="ml-1 text-slate-500">({{ response.metadata.robots_txt.disallow_count }} rules)</span>
+                                </span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">sitemap.xml</span>
+                                <span v-if="response.metadata.sitemap && response.metadata.sitemap.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">security.txt</span>
+                                <span v-if="response.metadata.security_txt && response.metadata.security_txt.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">Open Graph</span>
+                                <span v-if="response.metadata.meta_tags && response.metadata.meta_tags.open_graph" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">Twitter Card</span>
+                                <span v-if="response.metadata.meta_tags && response.metadata.meta_tags.twitter" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-600 dark:text-slate-400">Favicon</span>
+                                <span v-if="response.metadata.favicon && response.metadata.favicon.present" class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span v-if="response.metadata.favicon.hash" class="ml-1 font-mono text-slate-500">{{ response.metadata.favicon.hash.substring(0, 8) }}...</span>
+                                </span>
+                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-12 gap-6">
@@ -223,7 +435,7 @@
                                 <h3
                                     class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
                                     Target Status</h3>
-                                <button @click="showRawWhois()"
+                                <button v-if="response.raw_available" @click="showRawWhois()"
                                     class="text-xs text-cyan-600 dark:text-cyan-400 hover:underline">View Raw</button>
                             </div>
                             <div class="divide-y divide-slate-100 dark:divide-slate-800">
@@ -256,7 +468,7 @@
                                                     class="font-mono text-sm font-bold text-slate-700 dark:text-slate-200">{{
                                                     ip }}</span></div>
                                             <button @click="runWhois(ip)"
-                                                class="text-xs px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">Raw</button>
+                                                class="text-xs px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">Run WHOIS</button>
                                         </div>
                                         <div class="space-y-1">
                                             <div v-for="row in rows.split('\n')" class="grid grid-cols-3 gap-2 text-xs">
@@ -264,6 +476,7 @@
                                                     }}</span>
                                                 <span
                                                     class="col-span-2 text-slate-800 dark:text-slate-300 font-mono truncate"
+                                                    :title="row.split(':')[1]"
                                                     @contextmenu.prevent="showContextMenu($event, row.split(':')[1])">{{
                                                     row.split(":")[1] }}</span>
                                             </div>
@@ -387,14 +600,25 @@
                     class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full border border-slate-200 dark:border-slate-800">
                     <div class="px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                         <div class="flex justify-between items-center mb-4">
-                            <h3 class="text-lg leading-6 font-medium text-slate-900 dark:text-white">{{ dialog.title }}
-                            </h3>
-                            <button @click="dialog.show = false" class="text-slate-400 hover:text-slate-500"><span
-                                    class="mdi mdi-close text-xl"></span></button>
+                            <h3 class="text-lg leading-6 font-medium text-slate-900 dark:text-white">{{ dialog.title }}</h3>
+                            <button @click="dialog.show = false" class="text-slate-400 hover:text-slate-500"><span class="mdi mdi-close text-xl"></span></button>
+                        </div>
+                        <div v-if="dialog.tabs" class="flex gap-1 relative z-10">
+                            <button v-for="(content, tabName) in dialog.tabs" :key="tabName"
+                                @click="dialog.activeTab = tabName"
+                                class="px-4 py-2 text-sm font-medium rounded-t-lg border-t border-l border-r -mb-px"
+                                :class="dialog.activeTab === tabName
+                                    ? 'bg-slate-800 dark:bg-black/50 text-cyan-400 border-slate-700 border-b border-b-slate-800 dark:border-b-black/50'
+                                    : 'text-slate-400 dark:text-slate-500 hover:text-slate-200 dark:hover:text-slate-300 hover:bg-slate-700/50 dark:hover:bg-slate-800/30 border-transparent'">
+                                {{ tabName }}
+                            </button>
                         </div>
                         <div
-                            class="bg-black/50 rounded-lg p-4 overflow-auto max-h-[70vh] custom-scroll border border-slate-800">
-                            <pre
+                            class="bg-slate-800 dark:bg-black/50 p-4 overflow-auto max-h-[70vh] custom-scroll border border-slate-700 dark:border-slate-700 relative"
+                            :class="dialog.tabs ? 'rounded-b-lg rounded-tr-lg' : 'rounded-lg'">
+                            <pre v-if="dialog.tabs && dialog.activeTab"
+                                class="text-xs sm:text-sm text-cyan-50 font-mono whitespace-pre-wrap">{{ dialog.tabs[dialog.activeTab] }}</pre>
+                            <pre v-else
                                 class="text-xs sm:text-sm text-cyan-50 font-mono whitespace-pre-wrap">{{ dialog.content }}</pre>
                         </div>
                     </div>
@@ -422,27 +646,44 @@
                                     class="mdi mdi-close"></span></button>
                         </div>
                     </div>
-                    <div class="max-h-[60vh] overflow-y-auto custom-scroll">
+                    <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+                        <div class="relative">
+                            <span class="mdi mdi-magnify absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></span>
+                            <input v-model="historySearch" @input="searchHistory" type="text" ref="historySearchInput"
+                                class="w-full pl-10 pr-4 py-2 text-sm bg-slate-100 dark:bg-slate-800 border-0 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-500"
+                                placeholder="Search domains...">
+                        </div>
+                    </div>
+                    <div class="max-h-[50vh] overflow-y-auto custom-scroll">
                         <input type="file" ref="importFile" @change="importHistory" accept=".json" class="hidden" />
                         <ul v-if="historyItems.length > 0" class="divide-y divide-slate-200 dark:divide-slate-800">
-                            <li v-for="item in historyItems" :key="item.id" @click="loadFromHistory(item)"
-                                class="px-6 py-4 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors group">
+                            <li v-for="(item, index) in historyItems" :key="item.id || index" :id="'history-item-' + index"
+                                @click="loadFromHistory(item)"
+                                class="px-6 py-4 cursor-pointer transition-colors group"
+                                :class="{
+                                    'bg-slate-100 dark:bg-slate-800 ring-inset ring-2 ring-cyan-500/50': index === selectedHistoryIndex,
+                                    'hover:bg-slate-50 dark:hover:bg-slate-800': index !== selectedHistoryIndex
+                                }">
                                 <div class="flex justify-between items-center">
                                     <div>
-                                        <p class="text-sm font-medium text-cyan-600 dark:text-cyan-400">{{ item.domain
-                                            }}</p>
-                                        <p class="text-xs text-slate-500 dark:text-slate-400">{{ new Date(item.timestamp
-                                            * 1000).toLocaleString() }}</p>
+                                        <p class="text-sm font-medium text-cyan-600 dark:text-cyan-400">{{ item.domain }}</p>
+                                        <p class="text-xs text-slate-500 dark:text-slate-400">{{ new Date(item.timestamp * 1000).toLocaleString() }}</p>
                                     </div>
-                                    <span
-                                        class="mdi mdi-chevron-right text-slate-300 group-hover:text-slate-500"></span>
+                                    <span class="mdi mdi-chevron-right text-slate-300 group-hover:text-slate-500"></span>
                                 </div>
                             </li>
                         </ul>
                         <div v-else class="text-center py-12"><span
                                 class="mdi mdi-history text-5xl text-slate-200 dark:text-slate-700"></span>
-                            <p class="mt-2 text-slate-500">Log empty</p>
+                            <p class="mt-2 text-slate-500">{{ historySearch ? 'No matches found' : 'Log empty' }}</p>
                         </div>
+                    </div>
+                    <div v-if="historyItems.length > 0 && historyItems.length < historyTotal"
+                        class="px-6 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950">
+                        <button @click="loadMoreHistory"
+                            class="w-full text-sm text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300 font-medium">
+                            Load more ({{ historyItems.length }} of {{ historyTotal }})
+                        </button>
                     </div>
                 </div>
             </div>
@@ -511,19 +752,56 @@
                                 <kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">Esc</kbd>
                             </div>
                             <div class="flex justify-between items-center">
-                                <span class="text-sm text-slate-600 dark:text-slate-400">Navigate snapshots</span>
+                                <span class="text-sm text-slate-600 dark:text-slate-400">Navigate lists</span>
                                 <div class="flex gap-1">
                                     <kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">&uarr;</kbd>
                                     <kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">&darr;</kbd>
                                 </div>
                             </div>
                             <div class="flex justify-between items-center">
-                                <span class="text-sm text-slate-600 dark:text-slate-400">Select snapshot</span>
+                                <span class="text-sm text-slate-600 dark:text-slate-400">Select item</span>
                                 <kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">Enter</kbd>
                             </div>
                             <div class="flex justify-between items-center">
                                 <span class="text-sm text-slate-600 dark:text-slate-400">Show help</span>
                                 <kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">?</kbd>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm text-slate-600 dark:text-slate-400">Scan log</span>
+                                <div class="flex gap-1">
+                                    <kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">⌘</kbd>
+                                    <kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">K</kbd>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-if="bridgeHasDb" class="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
+                            <h4 class="text-sm font-semibold text-slate-900 dark:text-white uppercase tracking-wider mb-4">Database</h4>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between items-start gap-4">
+                                    <span class="text-slate-500 dark:text-slate-400">Path</span>
+                                    <span class="font-mono text-slate-700 dark:text-slate-300 text-right text-xs break-all">{{ dbInfo.path }}</span>
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-slate-500 dark:text-slate-400">Size</span>
+                                    <span class="font-mono text-slate-700 dark:text-slate-300">{{ formatBytes(dbInfo.size) }}</span>
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-slate-500 dark:text-slate-400">Stored Scans</span>
+                                    <span class="font-mono text-slate-700 dark:text-slate-300">{{ dbInfo.scanCount.toLocaleString() }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-if="localMode && scansInfo.path" class="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
+                            <h4 class="text-sm font-semibold text-slate-900 dark:text-white uppercase tracking-wider mb-4">Raw Data</h4>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between items-start gap-4">
+                                    <span class="text-slate-500 dark:text-slate-400">Path</span>
+                                    <span class="font-mono text-slate-700 dark:text-slate-300 text-right text-xs break-all">{{ scansInfo.path }}</span>
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-slate-500 dark:text-slate-400">Storage</span>
+                                    <span class="font-mono text-slate-700 dark:text-slate-300">{{ formatBytes(scansInfo.size) }}</span>
+                                </div>
                             </div>
                         </div>
                         <div class="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
@@ -560,22 +838,43 @@
                 return {
                     domain: "",
                     loading: false,
+                    loadingText: "Scanning...",
                     localMode: false,
                     bridgeHasDb: false,
+                    dbInfo: { path: '', size: 0, scanCount: 0 },
+                    scansInfo: { path: '', size: 0 },
+                    serverVersion: null,
                     response: { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} },
                     currentTheme: localStorage.getItem('theme') || (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
-                    showHistoryModal: false, historyItems: [], showVersionsModal: false, domainVersions: [], showAutocomplete: false,
+                    showHistoryModal: false, historyItems: [], historyTotal: 0, historySearch: '', showVersionsModal: false, domainVersions: [], showAutocomplete: false,
                     snackbar: { show: false, message: "" },
                     contextMenu: { show: false, x: 0, y: 0, value: '' },
-                    dialog: { show: false, title: '', content: '' },
+                    dialog: { show: false, title: '', content: '', tabs: null, activeTab: null },
                     selectedIndex: -1,
+                    selectedHistoryIndex: -1,
                     showHelpModal: false,
-                    version: '1.0',
+                    version: '1.1',
+                    pendingDeepLink: null,
                 }
             },
             watch: {
                 showVersionsModal(val) {
-                    if (val) this.selectedIndex = -1;
+                    if (val) {
+                        // Find index of currently displayed scan
+                        this.selectedIndex = this.domainVersions.findIndex(v => v.timestamp === this.response.timestamp);
+                        if (this.selectedIndex === -1) this.selectedIndex = 0;
+                        this.$nextTick(() => this.scrollToSelected());
+                    }
+                },
+                showHistoryModal(val) {
+                    if (val) {
+                        this.selectedHistoryIndex = -1;
+                        this.historySearch = '';
+                        this.loadHistory();
+                        this.$nextTick(() => {
+                            if (this.$refs.historySearchInput) this.$refs.historySearchInput.focus();
+                        });
+                    }
                 }
             },
             computed: {
@@ -607,9 +906,21 @@
                 }
             },
             mounted() {
+                this.loadHistory();
+
                 const urlParams = new URLSearchParams(window.location.search);
-                if (urlParams.has('local')) { this.localMode = true; this.checkBridgeCapabilities(); }
-                else { this.loadHistory(); }
+
+                // Store deep-link domain for later (after bridge connects)
+                const domainParam = urlParams.get('domain');
+                if (domainParam) {
+                    this.domain = domainParam;
+                    this.pendingDeepLink = domainParam;
+                }
+
+                if (urlParams.has('local')) {
+                    this.localMode = true;
+                    this.checkBridgeCapabilities();
+                }
                 document.addEventListener('keydown', (e) => {
                     // 1. Existing shortcuts
                     if (e.key === 'Escape') {
@@ -628,27 +939,49 @@
                         e.preventDefault();
                         this.showHelpModal = true;
                     }
+                    if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        this.openHistory();
+                    }
 
-                    // 2. NEW: Snapshot Modal Navigation
+                    // 2. Snapshot Modal Navigation
                     if (this.showVersionsModal && this.domainVersions.length > 0) {
                         if (e.key === 'ArrowDown') {
                             e.preventDefault();
-                            // Move down, loop back to top if at end
                             this.selectedIndex = (this.selectedIndex + 1) % this.domainVersions.length;
                             this.scrollToSelected();
                         }
                         else if (e.key === 'ArrowUp') {
                             e.preventDefault();
-                            // Move up, loop to bottom if at top
                             if (this.selectedIndex === -1) this.selectedIndex = this.domainVersions.length - 1;
                             else this.selectedIndex = (this.selectedIndex - 1 + this.domainVersions.length) % this.domainVersions.length;
                             this.scrollToSelected();
                         }
                         else if (e.key === 'Enter') {
                             e.preventDefault();
-                            // Load the selected item (if one is selected)
                             if (this.selectedIndex > -1) {
                                 this.loadFromHistory(this.domainVersions[this.selectedIndex]);
+                            }
+                        }
+                    }
+
+                    // 3. History Modal Navigation
+                    if (this.showHistoryModal && this.historyItems.length > 0) {
+                        if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            this.selectedHistoryIndex = (this.selectedHistoryIndex + 1) % this.historyItems.length;
+                            this.scrollToSelectedHistory();
+                        }
+                        else if (e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            if (this.selectedHistoryIndex === -1) this.selectedHistoryIndex = this.historyItems.length - 1;
+                            else this.selectedHistoryIndex = (this.selectedHistoryIndex - 1 + this.historyItems.length) % this.historyItems.length;
+                            this.scrollToSelectedHistory();
+                        }
+                        else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (this.selectedHistoryIndex > -1) {
+                                this.loadFromHistory(this.historyItems[this.selectedHistoryIndex]);
                             }
                         }
                     }
@@ -674,9 +1007,22 @@
                 },
                 copyInstallCmd() { navigator.clipboard.writeText("curl -sL https://periscope.run/boot.sh | bash"); this.showToast("Command copied!"); },
                 showToast(msg) { this.snackbar.message = msg; this.snackbar.show = true; setTimeout(() => this.snackbar.show = false, 3000); },
+                formatBytes(bytes) {
+                    if (bytes === 0) return '0 B';
+                    const k = 1024;
+                    const sizes = ['B', 'KB', 'MB', 'GB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+                },
                 scrollToSelected() {
                     this.$nextTick(() => {
                         const el = document.getElementById('version-item-' + this.selectedIndex);
+                        if (el) el.scrollIntoView({ block: 'nearest' });
+                    });
+                },
+                scrollToSelectedHistory() {
+                    this.$nextTick(() => {
+                        const el = document.getElementById('history-item-' + this.selectedHistoryIndex);
                         if (el) el.scrollIntoView({ block: 'nearest' });
                     });
                 },
@@ -687,6 +1033,7 @@
                 lookupDomain() {
                     if (!this.domain) return;
                     this.loading = true;
+                    this.loadingText = "Scanning...";
                     this.showAutocomplete = false;
                     this.response = { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} };
 
@@ -740,16 +1087,42 @@
                 isDomain(str) { return /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\.?$/.test(str) && !this.isIp(str); },
                 isIp(str) { return /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(str); },
                 runDig(domain) {
-                    this.dialog.title = `Dig: ${domain}`; this.dialog.content = 'Loading...'; this.dialog.show = true; this.contextMenu.show = false;
+                    this.dialog.title = `Dig: ${domain}`; this.dialog.content = 'Loading...'; this.dialog.tabs = null; this.dialog.activeTab = null; this.dialog.show = true; this.contextMenu.show = false;
                     fetch(this.getUrl(`dig=${encodeURIComponent(domain)}`)).then(r => r.text()).then(d => this.dialog.content = d || 'No results.');
                 },
                 runWhois(ip) {
-                    this.dialog.title = `Whois: ${ip}`; this.dialog.content = 'Loading...'; this.dialog.show = true; this.contextMenu.show = false;
+                    this.dialog.title = `Whois: ${ip}`; this.dialog.content = 'Loading...'; this.dialog.tabs = null; this.dialog.activeTab = null; this.dialog.show = true; this.contextMenu.show = false;
                     fetch(this.getUrl(`whois=${encodeURIComponent(ip)}`)).then(r => r.text()).then(d => this.dialog.content = d || 'No results.');
                 },
                 showRawWhois() {
-                    this.dialog.title = `Raw JSON: ${this.domain}`; this.dialog.content = 'Loading...'; this.dialog.show = true;
-                    fetch(this.getUrl(`raw_domain=${encodeURIComponent(this.domain)}`)).then(r => r.text()).then(d => this.dialog.content = d || 'No results.');
+                    this.dialog.title = `Raw Data: ${this.domain}`;
+                    this.dialog.content = 'Loading...';
+                    this.dialog.tabs = null;
+                    this.dialog.activeTab = null;
+                    this.dialog.show = true;
+                    
+                    const baseUrl = `action=get_raw&domain=${encodeURIComponent(this.domain)}&timestamp=${this.response.timestamp}`;
+                    Promise.all([
+                        fetch(this.getUrl(`${baseUrl}&type=whois_domain`)).then(r => r.text()),
+                        fetch(this.getUrl(`${baseUrl}&type=rdap`)).then(r => r.text())
+                    ]).then(([whois, rdap]) => {
+                        const tabs = {};
+                        if (whois && !whois.includes('No raw data')) tabs['WHOIS'] = whois;
+                        if (rdap && !rdap.includes('No raw data')) {
+                            try {
+                                tabs['RDAP'] = JSON.stringify(JSON.parse(rdap), null, 2);
+                            } catch (e) {
+                                tabs['RDAP'] = rdap;
+                            }
+                        }
+                        if (Object.keys(tabs).length > 0) {
+                            this.dialog.tabs = tabs;
+                            this.dialog.activeTab = Object.keys(tabs)[0];
+                            this.dialog.content = '';
+                        } else {
+                            this.dialog.content = 'No raw data stored for this scan.';
+                        }
+                    });
                 },
 
                 // History
@@ -757,10 +1130,83 @@
                     this.loadHistory();
                     this.showHistoryModal = true;
                 },
-                checkBridgeCapabilities() { fetch(this.getUrl('action=check_status')).then(r => r.json()).then(data => { this.bridgeHasDb = data.has_db; this.loadHistory(); }); },
-                loadHistory() {
-                    if (this.bridgeHasDb) fetch(this.getUrl('action=get_history')).then(r => r.json()).then(data => { this.historyItems = data; });
-                    else { const stored = localStorage.getItem('periscope_history'); if (stored) this.historyItems = JSON.parse(stored); }
+                checkBridgeCapabilities() {
+                    fetch(this.getUrl('action=check_status'))
+                        .then(r => r.json())
+                        .then(data => {
+                            this.bridgeHasDb = data.has_db;
+                            this.serverVersion = data.plugin_version || null;
+                            if (data.has_db) {
+                                this.dbInfo = {
+                                    path: data.db_path || '',
+                                    size: data.db_size || 0,
+                                    scanCount: data.scan_count || 0
+                                };
+                            }
+                            // Scans directory info
+                            this.scansInfo = {
+                                path: data.scans_path || '',
+                                size: data.scans_size || 0
+                            };
+
+                            // Wait for history to load before processing deep link
+                            this.loadHistory().then(() => {
+                                if (this.pendingDeepLink) {
+                                    this.handleDeepLink(this.pendingDeepLink);
+                                    this.pendingDeepLink = null;
+                                }
+                            });
+                        })
+                        .catch(e => {
+                            this.pendingDeepLink = null;
+                        });
+                },
+                handleDeepLink(domain) {
+                    const cached = this.historyItems.find(item =>
+                        item.domain.toLowerCase() === domain.toLowerCase()
+                    );
+
+                    if (cached) {
+                        this.loadFromHistory(cached);
+                    } else {
+                        this.domain = domain;
+                        this.lookupDomain();
+                    }
+                },
+                loadHistory(append = false) {
+                    if (this.bridgeHasDb) {
+                        const offset = append ? this.historyItems.length : 0;
+                        const searchParam = this.historySearch ? `&search=${encodeURIComponent(this.historySearch)}` : '';
+                        return fetch(this.getUrl(`action=get_history&offset=${offset}${searchParam}`))
+                            .then(r => r.json())
+                            .then(data => {
+                                if (append) {
+                                    this.historyItems = [...this.historyItems, ...data.items];
+                                } else {
+                                    this.historyItems = data.items;
+                                }
+                                this.historyTotal = data.total;
+                            });
+                    } else {
+                        const stored = localStorage.getItem('periscope_history');
+                        if (stored) {
+                            let items = JSON.parse(stored);
+                            if (this.historySearch) {
+                                items = items.filter(i => i.domain.toLowerCase().includes(this.historySearch.toLowerCase()));
+                            }
+                            this.historyItems = items;
+                            this.historyTotal = items.length;
+                        }
+                        return Promise.resolve();
+                    }
+                },
+                searchHistory() {
+                    this.selectedHistoryIndex = -1;
+                    clearTimeout(this.searchTimeout);
+                    this.searchTimeout = setTimeout(() => this.loadHistory(false), 300);
+                },
+                loadMoreHistory() {
+                    this.loadHistory(true);
                 },
                 getDomainVersions(domain) {
                     if (this.bridgeHasDb) fetch(this.getUrl(`action=get_domain_versions&domain=${encodeURIComponent(domain)}`)).then(r => r.json()).then(data => { this.domainVersions = data; });
@@ -778,20 +1224,57 @@
                 },
                 loadFromHistory(item) {
                     this.domain = item.domain;
+                    this.showHistoryModal = false;
+                    this.showVersionsModal = false;
                     if (item.data) { this.finishLoad(item, item.data); return; }
                     if (this.bridgeHasDb && item.id) {
                         this.loading = true;
-                        fetch(this.getUrl(`action=get_history_item&id=${item.id}`)).then(r => r.json()).then(data => { this.loading = false; this.finishLoad(item, data); });
+                        this.loadingText = "Loading...";
+                        // Clear current response while loading
+                        this.response = { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} };
+                        fetch(this.getUrl(`action=get_history_item&id=${item.id}`)).then(r => r.json()).then(data => { 
+                            this.loading = false; 
+                            this.finishLoad(item, data); 
+                            
+                            // Check if cache was regenerated or needs regeneration
+                            if (data.cache_status === 'regenerated') {
+                                this.showToast('Cache updated for new plugin version');
+                            } else if (this.serverVersion && data.plugin_version && data.plugin_version !== this.serverVersion) {
+                                // Version mismatch - trigger background regeneration
+                                this.regenerateCache(item.id);
+                            }
+                        });
                     }
+                },
+                regenerateCache(id) {
+                    // Background regeneration - updates cache and refreshes UI if data changed
+                    fetch(this.getUrl(`action=regenerate_cache&id=${id}`))
+                        .then(r => r.json())
+                        .then(result => {
+                            if (result.success && result.data) {
+                                // Check if anything meaningful changed
+                                const oldJson = JSON.stringify(this.response);
+                                const newJson = JSON.stringify(result.data);
+                                if (oldJson !== newJson) {
+                                    this.response = result.data;
+                                    this.$nextTick(() => { Prism.highlightAll() });
+                                    this.showToast('Scan data updated');
+                                }
+                            }
+                        })
+                        .catch(() => { /* Silent fail for background regeneration */ });
                 },
                 finishLoad(item, data) {
                     this.response = data; if (!this.response.timestamp) this.response.timestamp = item.timestamp;
-                    this.showHistoryModal = false; this.showVersionsModal = false;
                     this.getDomainVersions(item.domain); this.$nextTick(() => { Prism.highlightAll() });
+
+                    // Update URL to reflect selected domain
+                    const newUrl = new URL(window.location);
+                    newUrl.searchParams.set('domain', item.domain);
+                    window.history.pushState({}, '', newUrl);
                 },
                 deleteHistoryItem(index, item) {
                     if (this.bridgeHasDb) {
-                        // FIX: PHP expects $_POST['id'], so we must send FormData
                         const fd = new FormData();
                         fd.append('id', item.id);
                         fetch(this.getUrl('action=delete_history'), { method: 'POST', body: fd })
