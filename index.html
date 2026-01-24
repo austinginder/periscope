@@ -996,6 +996,156 @@
                             </div>
                         </div>
 
+                        <!-- Email Health -->
+                        <div v-if="emailHealthAnalysis" class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                            <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex items-center justify-between">
+                                <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
+                                    Email Health
+                                </h3>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-2xl font-bold"
+                                        :class="{
+                                            'text-emerald-600 dark:text-emerald-400': emailHealthAnalysis.grade === 'A',
+                                            'text-cyan-600 dark:text-cyan-400': emailHealthAnalysis.grade === 'B',
+                                            'text-amber-600 dark:text-amber-400': emailHealthAnalysis.grade === 'C',
+                                            'text-orange-600 dark:text-orange-400': emailHealthAnalysis.grade === 'D',
+                                            'text-red-600 dark:text-red-400': emailHealthAnalysis.grade === 'F'
+                                        }">
+                                        {{ emailHealthAnalysis.grade }}
+                                    </span>
+                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">
+                                        {{ emailHealthAnalysis.totalScore }}/{{ emailHealthAnalysis.maxScore }}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- Score Breakdown -->
+                            <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                                <!-- MX Records -->
+                                <div class="px-5 py-3 flex items-center gap-4">
+                                    <div class="flex-shrink-0 w-8 text-center">
+                                        <span class="mdi mdi-email text-purple-500"></span>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">MX Records</span>
+                                        </div>
+                                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                            {{ emailHealthAnalysis.mxCount }} mail server(s) configured
+                                        </p>
+                                    </div>
+                                    <div class="flex-shrink-0">
+                                        <span class="text-xs font-mono px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">
+                                            +10 pts
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- SPF -->
+                                <div class="px-5 py-3 flex items-center gap-4">
+                                    <div class="flex-shrink-0 w-8 text-center">
+                                        <span v-if="emailHealthAnalysis.spf.present" class="mdi mdi-check-circle text-emerald-500"></span>
+                                        <span v-else class="mdi mdi-close-circle text-red-400"></span>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">SPF</span>
+                                        </div>
+                                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                            <span v-if="emailHealthAnalysis.spf.present">
+                                                {{ emailHealthAnalysis.spf.details.join(' · ') }}
+                                            </span>
+                                            <span v-else class="text-red-500 dark:text-red-400">No SPF record found</span>
+                                        </p>
+                                    </div>
+                                    <div class="flex-shrink-0">
+                                        <span class="text-xs font-mono px-2 py-1 rounded"
+                                            :class="emailHealthAnalysis.spf.score === 25
+                                                ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                                                : emailHealthAnalysis.spf.score > 0
+                                                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                                                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'">
+                                            +{{ emailHealthAnalysis.spf.score }}/25 pts
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- DKIM -->
+                                <div class="px-5 py-3 flex items-center gap-4">
+                                    <div class="flex-shrink-0 w-8 text-center">
+                                        <span v-if="emailHealthAnalysis.dkim.present" class="mdi mdi-key text-cyan-500"></span>
+                                        <span v-else class="mdi mdi-key-remove text-red-400"></span>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">DKIM</span>
+                                        </div>
+                                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                            <span v-if="emailHealthAnalysis.dkim.present">
+                                                Selectors: {{ emailHealthAnalysis.dkim.selectors.join(', ') }}
+                                            </span>
+                                            <span v-else class="text-red-500 dark:text-red-400">No DKIM records found</span>
+                                        </p>
+                                    </div>
+                                    <div class="flex-shrink-0">
+                                        <span class="text-xs font-mono px-2 py-1 rounded"
+                                            :class="emailHealthAnalysis.dkim.score === 30
+                                                ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                                                : emailHealthAnalysis.dkim.score > 0
+                                                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                                                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'">
+                                            +{{ emailHealthAnalysis.dkim.score }}/30 pts
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- DMARC -->
+                                <div class="px-5 py-3 flex items-center gap-4">
+                                    <div class="flex-shrink-0 w-8 text-center">
+                                        <span v-if="emailHealthAnalysis.dmarc.present" class="mdi mdi-shield-check text-emerald-500"></span>
+                                        <span v-else class="mdi mdi-shield-off text-red-400"></span>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">DMARC</span>
+                                        </div>
+                                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                            <span v-if="emailHealthAnalysis.dmarc.present">
+                                                {{ emailHealthAnalysis.dmarc.details.join(' · ') }}
+                                            </span>
+                                            <span v-else class="text-red-500 dark:text-red-400">No DMARC record found</span>
+                                        </p>
+                                    </div>
+                                    <div class="flex-shrink-0">
+                                        <span class="text-xs font-mono px-2 py-1 rounded"
+                                            :class="emailHealthAnalysis.dmarc.score === 35
+                                                ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                                                : emailHealthAnalysis.dmarc.score > 0
+                                                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                                                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'">
+                                            +{{ emailHealthAnalysis.dmarc.score }}/35 pts
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Recommendations -->
+                            <div v-if="emailHealthAnalysis.recommendations.length > 0"
+                                class="px-5 py-3 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-100 dark:border-amber-900/30">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="mdi mdi-lightbulb text-amber-600 dark:text-amber-400"></span>
+                                    <span class="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wider">Recommendations</span>
+                                </div>
+                                <ul class="space-y-1">
+                                    <li v-for="rec in emailHealthAnalysis.recommendations" :key="rec"
+                                        class="text-sm text-amber-700 dark:text-amber-300 flex items-start gap-2">
+                                        <span class="mdi mdi-chevron-right mt-0.5 flex-shrink-0"></span>
+                                        <span>{{ rec }}</span>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+
                         <div
                             class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                             <div
@@ -1558,7 +1708,7 @@
                     loading: false,
                     loadingText: "Scanning...",
                     loadingFromHistory: false,
-                    progress: { step: 0, total: 6, percent: 0, message: '' },
+                    progress: { step: 0, total: 7, percent: 0, message: '' },
                     localMode: false,
                     bridgeConnected: null,
                     bridgeHasDb: false,
@@ -1885,6 +2035,140 @@
                         isValid: errors.length === 0,
                         hasWarnings: warnings.length > 0
                     };
+                },
+                emailHealthAnalysis() {
+                    if (!this.response.dns_records) return null;
+
+                    // Check for MX records
+                    const mxRecords = this.response.dns_records.filter(r => r.type === 'MX');
+                    if (mxRecords.length === 0) return null; // Don't show section if no mail servers
+
+                    const result = {
+                        hasMx: true,
+                        mxCount: mxRecords.length,
+                        spf: { present: false, valid: false, strict: false, score: 0, details: [] },
+                        dkim: { present: false, selectors: [], score: 0, details: [] },
+                        dmarc: { present: false, valid: false, policy: null, score: 0, details: [] },
+                        totalScore: 0,
+                        maxScore: 100,
+                        grade: 'F',
+                        recommendations: []
+                    };
+
+                    // MX Score: 10 points for having MX records
+                    result.totalScore += 10;
+
+                    // SPF Analysis: 25 points total
+                    // Exists: 10, Valid: 10, Strict (-all/~all): 5
+                    const spfRecord = this.response.dns_records.find(r => {
+                        if (r.type !== 'TXT') return false;
+                        const val = r.value.replace(/^["']|["']$/g, '').trim();
+                        return val.toLowerCase().startsWith('v=spf1');
+                    });
+
+                    if (spfRecord) {
+                        result.spf.present = true;
+                        result.spf.score += 10;
+                        result.spf.details.push('SPF record found');
+
+                        // Check validity via spfAnalysis
+                        if (this.spfAnalysis && this.spfAnalysis.isValid) {
+                            result.spf.valid = true;
+                            result.spf.score += 10;
+                            result.spf.details.push('Valid');
+                        }
+
+                        // Check strictness (-all or ~all)
+                        const spfValue = spfRecord.value.replace(/^["']|["']$/g, '').trim();
+                        if (spfValue.includes('-all')) {
+                            result.spf.strict = true;
+                            result.spf.score += 5;
+                            result.spf.details.push('Hard fail');
+                        } else if (spfValue.includes('~all')) {
+                            result.spf.strict = true;
+                            result.spf.score += 5;
+                            result.spf.details.push('Soft fail');
+                        } else {
+                            result.recommendations.push('Upgrade SPF policy to use -all or ~all for stricter enforcement');
+                        }
+                    } else {
+                        result.recommendations.push('Add an SPF record to authorize email senders');
+                    }
+                    result.totalScore += result.spf.score;
+
+                    // DKIM Analysis: 30 points total
+                    // First selector: 15, Additional: +5 each (max 30)
+                    const dkimRecords = this.response.dns_records.filter(r => {
+                        if (r.type !== 'TXT') return false;
+                        // DKIM records have _domainkey in the name
+                        return r.name.includes('._domainkey');
+                    });
+
+                    if (dkimRecords.length > 0) {
+                        result.dkim.present = true;
+                        // Extract selector names
+                        result.dkim.selectors = dkimRecords.map(r => {
+                            const match = r.name.match(/^([^.]+)\._domainkey/);
+                            return match ? match[1] : r.name.split('._domainkey')[0];
+                        });
+
+                        // Score: 15 for first, +5 for each additional (max 30)
+                        result.dkim.score = Math.min(30, 15 + (dkimRecords.length - 1) * 5);
+                        result.dkim.details.push(`${dkimRecords.length} selector(s) found`);
+                    } else {
+                        result.recommendations.push('Add DKIM records to cryptographically sign outgoing emails');
+                    }
+                    result.totalScore += result.dkim.score;
+
+                    // DMARC Analysis: 35 points total
+                    // Exists: 10, Valid: 5, Policy: reject=20, quarantine=15, none=5
+                    const dmarcRecord = this.response.dns_records.find(r => {
+                        if (r.type !== 'TXT') return false;
+                        return r.name.startsWith('_dmarc') && r.value.toLowerCase().includes('v=dmarc1');
+                    });
+
+                    if (dmarcRecord) {
+                        result.dmarc.present = true;
+                        result.dmarc.score += 10;
+                        result.dmarc.details.push('DMARC found');
+
+                        const dmarcValue = dmarcRecord.value.toLowerCase();
+
+                        // Check for valid structure (has v=dmarc1 and p=)
+                        if (dmarcValue.includes('v=dmarc1') && dmarcValue.includes('p=')) {
+                            result.dmarc.valid = true;
+                            result.dmarc.score += 5;
+                        }
+
+                        // Check policy
+                        const policyMatch = dmarcValue.match(/p\s*=\s*(reject|quarantine|none)/);
+                        if (policyMatch) {
+                            result.dmarc.policy = policyMatch[1];
+                            result.dmarc.details.push(`Policy: ${policyMatch[1]}`);
+
+                            if (policyMatch[1] === 'reject') {
+                                result.dmarc.score += 20;
+                            } else if (policyMatch[1] === 'quarantine') {
+                                result.dmarc.score += 15;
+                                result.recommendations.push('Consider upgrading DMARC policy from quarantine to reject for maximum protection');
+                            } else if (policyMatch[1] === 'none') {
+                                result.dmarc.score += 5;
+                                result.recommendations.push('Upgrade DMARC policy from none to quarantine or reject');
+                            }
+                        }
+                    } else {
+                        result.recommendations.push('Add a DMARC record to protect against email spoofing');
+                    }
+                    result.totalScore += result.dmarc.score;
+
+                    // Calculate grade
+                    if (result.totalScore >= 90) result.grade = 'A';
+                    else if (result.totalScore >= 75) result.grade = 'B';
+                    else if (result.totalScore >= 60) result.grade = 'C';
+                    else if (result.totalScore >= 40) result.grade = 'D';
+                    else result.grade = 'F';
+
+                    return result;
                 }
             },
             mounted() {
@@ -2129,7 +2413,7 @@
                     this.loading = true;
                     this.loadingText = "Scanning...";
                     this.showAutocomplete = false;
-                    this.progress = { step: 0, total: 6, percent: 0, message: 'Initializing...' };
+                    this.progress = { step: 0, total: 7, percent: 0, message: 'Initializing...' };
                     this.response = { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} };
 
                     // 1. Update URL
@@ -2158,7 +2442,7 @@
                                 } else if (payload.type === 'complete') {
                                     eventSource.close();
                                     this.loading = false;
-                                    this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                                    this.progress = { step: 0, total: 7, percent: 0, message: '' };
 
                                     const data = payload.data;
                                     if (data.errors && data.errors.length > 0) {
@@ -2172,14 +2456,14 @@
                                 } else if (payload.type === 'error') {
                                     eventSource.close();
                                     this.loading = false;
-                                    this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                                    this.progress = { step: 0, total: 7, percent: 0, message: '' };
                                     this.response.errors.push(`<strong>Scan Error:</strong><br/>${payload.message}`);
                                 }
                             } catch (e) {
                                 // JSON parse failed
                                 eventSource.close();
                                 this.loading = false;
-                                this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                                this.progress = { step: 0, total: 7, percent: 0, message: '' };
                                 this.response.errors.push(`<strong>Server Error:</strong><br/>${event.data}`);
                             }
                         };
@@ -2187,7 +2471,7 @@
                         eventSource.onerror = (e) => {
                             eventSource.close();
                             this.loading = false;
-                            this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                            this.progress = { step: 0, total: 7, percent: 0, message: '' };
                             const url = this.localMode ? 'http://127.0.0.1:8989' : window.location.origin;
                             this.response.errors.push(`<strong>Network Connection Failed</strong><br/><span class="text-red-600/70 dark:text-red-300/70">Could not connect to ${url}</span><br/><button onclick="document.querySelector('#app').__vue_app__._instance.proxy.lookupDomain()" class="mt-2 text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:underline">Retry Connection</button>`);
                         };
@@ -2199,7 +2483,7 @@
                                 try {
                                     const data = JSON.parse(text);
                                     this.loading = false;
-                                    this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                                    this.progress = { step: 0, total: 7, percent: 0, message: '' };
 
                                     if (data.errors && data.errors.length > 0) {
                                         this.response.errors = data.errors;
@@ -2211,13 +2495,13 @@
                                     }
                                 } catch (e) {
                                     this.loading = false;
-                                    this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                                    this.progress = { step: 0, total: 7, percent: 0, message: '' };
                                     this.response.errors.push(`<strong>Server Error:</strong><br/>${text}`);
                                 }
                             })
                             .catch(e => {
                                 this.loading = false;
-                                this.progress = { step: 0, total: 6, percent: 0, message: '' };
+                                this.progress = { step: 0, total: 7, percent: 0, message: '' };
                                 const url = this.localMode ? 'http://127.0.0.1:8989' : window.location.origin;
                                 this.response.errors.push(`<strong>Network Connection Failed</strong><br/><span class="text-red-600/70 dark:text-red-300/70">Could not connect to ${url}</span><br/><button onclick="document.querySelector('#app').__vue_app__._instance.proxy.lookupDomain()" class="mt-2 text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:underline">Retry Connection</button>`);
                             });

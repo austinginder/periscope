@@ -154,6 +154,129 @@ use Badcow\DNS\ResourceRecord;
 use Badcow\DNS\AlignedBuilder;
 use Badcow\DNS\Rdata\TXT;
 
+// === CONSTANTS ===
+
+// Multi-part TLDs for domain extraction
+const MULTI_PART_TLDS = [
+    'co.uk', 'org.uk', 'me.uk', 'ac.uk', 'gov.uk', 'net.uk', 'sch.uk',
+    'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'asn.au', 'id.au',
+    'co.nz', 'net.nz', 'org.nz', 'govt.nz', 'ac.nz', 'school.nz',
+    'co.za', 'org.za', 'web.za', 'net.za', 'gov.za',
+    'com.br', 'net.br', 'org.br', 'gov.br', 'edu.br',
+    'co.jp', 'or.jp', 'ne.jp', 'ac.jp', 'go.jp',
+    'co.kr', 'or.kr', 'ne.kr', 'go.kr', 're.kr',
+    'com.cn', 'net.cn', 'org.cn', 'gov.cn', 'edu.cn',
+    'com.tw', 'net.tw', 'org.tw', 'gov.tw', 'edu.tw',
+    'com.hk', 'net.hk', 'org.hk', 'gov.hk', 'edu.hk',
+    'com.sg', 'net.sg', 'org.sg', 'gov.sg', 'edu.sg',
+    'co.in', 'net.in', 'org.in', 'gov.in', 'ac.in', 'res.in',
+    'com.mx', 'net.mx', 'org.mx', 'gob.mx', 'edu.mx',
+    'com.ar', 'net.ar', 'org.ar', 'gov.ar', 'edu.ar',
+    'co.il', 'org.il', 'net.il', 'ac.il', 'gov.il',
+    'com.tr', 'net.tr', 'org.tr', 'gov.tr', 'edu.tr',
+    'com.pl', 'net.pl', 'org.pl', 'gov.pl', 'edu.pl',
+    'co.id', 'or.id', 'web.id', 'ac.id', 'go.id',
+    'com.my', 'net.my', 'org.my', 'gov.my', 'edu.my',
+    'com.ph', 'net.ph', 'org.ph', 'gov.ph', 'edu.ph',
+    'com.vn', 'net.vn', 'org.vn', 'gov.vn', 'edu.vn',
+    'co.th', 'or.th', 'ac.th', 'go.th', 'in.th',
+    'com.ua', 'net.ua', 'org.ua', 'gov.ua', 'edu.ua',
+    'com.ru', 'net.ru', 'org.ru', 'gov.ru', 'edu.ru',
+    'com.de', 'org.de',
+    'co.at', 'or.at', 'ac.at',
+    'com.es', 'org.es', 'nom.es', 'gob.es', 'edu.es',
+    'com.pt', 'org.pt', 'gov.pt', 'edu.pt',
+    'co.it', 'org.it', 'gov.it', 'edu.it',
+    'co.fr', 'asso.fr', 'nom.fr', 'gouv.fr',
+    'co.nl', 'org.nl',
+    'co.be', 'org.be',
+    'eu.com', 'us.com', 'gb.com', 'uk.com', 'de.com', 'jpn.com', 'kr.com', 'cn.com',
+    'eu.org', 'us.org',
+];
+
+// DNS Checks - Core records and common subdomains
+const DNS_CHECKS_CORE = [
+    ['type' => 'A', 'name' => ''], ['type' => 'A', 'name' => 'www'],
+    ['type' => 'AAAA', 'name' => ''], ['type' => 'AAAA', 'name' => 'www'],
+    ['type' => 'NS', 'name' => ''], ['type' => 'SOA', 'name' => ''], ['type' => 'MX', 'name' => ''], ['type' => 'TXT', 'name' => ''],
+    ['type' => 'CAA', 'name' => ''],
+    ['type' => 'HTTPS', 'name' => ''], ['type' => 'SVCB', 'name' => ''],
+    ['type' => 'TLSA', 'name' => '_443._tcp'], ['type' => 'TLSA', 'name' => '_25._tcp'],
+    // Common subdomains
+    ['type' => 'A', 'name' => 'mail'], ['type' => 'A', 'name' => 'webmail'], ['type' => 'A', 'name' => 'smtp'],
+    ['type' => 'A', 'name' => 'imap'], ['type' => 'A', 'name' => 'ftp'], ['type' => 'A', 'name' => 'cpanel'],
+    ['type' => 'A', 'name' => 'whm'], ['type' => 'A', 'name' => 'plesk'], ['type' => 'A', 'name' => 'blog'],
+    ['type' => 'A', 'name' => 'shop'], ['type' => 'A', 'name' => 'portal'], ['type' => 'A', 'name' => 'dev'],
+    ['type' => 'A', 'name' => 'api'], ['type' => 'A', 'name' => 'app'], ['type' => 'A', 'name' => 'remote'],
+    ['type' => 'A', 'name' => 'vpn'],
+    ['type' => 'A', 'name' => 'staging'], ['type' => 'A', 'name' => 'stage'],
+    ['type' => 'A', 'name' => 'test'], ['type' => 'A', 'name' => 'testing'],
+    ['type' => 'A', 'name' => 'uat'], ['type' => 'A', 'name' => 'demo'],
+    ['type' => 'A', 'name' => 'admin'], ['type' => 'A', 'name' => 'administrator'],
+    ['type' => 'A', 'name' => 'dashboard'], ['type' => 'A', 'name' => 'panel'],
+    ['type' => 'A', 'name' => 'login'], ['type' => 'A', 'name' => 'signin'],
+    ['type' => 'A', 'name' => 'auth'], ['type' => 'A', 'name' => 'sso'], ['type' => 'A', 'name' => 'oauth'],
+    ['type' => 'A', 'name' => 'secure'], ['type' => 'A', 'name' => 'ssl'],
+    ['type' => 'A', 'name' => 'static'], ['type' => 'A', 'name' => 'assets'], ['type' => 'A', 'name' => 'img'], ['type' => 'A', 'name' => 'images'],
+    ['type' => 'A', 'name' => 'media'], ['type' => 'A', 'name' => 'files'], ['type' => 'A', 'name' => 'downloads'],
+    ['type' => 'A', 'name' => 'docs'], ['type' => 'A', 'name' => 'documentation'],
+    ['type' => 'A', 'name' => 'support'], ['type' => 'A', 'name' => 'help'], ['type' => 'A', 'name' => 'kb'],
+    ['type' => 'A', 'name' => 'beta'], ['type' => 'A', 'name' => 'alpha'], ['type' => 'A', 'name' => 'sandbox'],
+    ['type' => 'A', 'name' => 'internal'], ['type' => 'A', 'name' => 'intranet'],
+    ['type' => 'A', 'name' => 'gateway'], ['type' => 'A', 'name' => 'proxy'],
+    ['type' => 'A', 'name' => 'git'], ['type' => 'A', 'name' => 'gitlab'], ['type' => 'A', 'name' => 'jenkins'], ['type' => 'A', 'name' => 'ci'],
+    // Microsoft / Office 365
+    ['type' => 'CNAME', 'name' => 'cdn'], ['type' => 'CNAME', 'name' => 'status'],
+    ['type' => 'CNAME', 'name' => 'autodiscover'], ['type' => 'CNAME', 'name' => 'lyncdiscover'], ['type' => 'CNAME', 'name' => 'sip'],
+    ['type' => 'CNAME', 'name' => 'enterpriseregistration'], ['type' => 'CNAME', 'name' => 'enterpriseenrollment'], ['type' => 'CNAME', 'name' => 'msoid'],
+    ['type' => 'SRV', 'name' => '_sip._tls'], ['type' => 'SRV', 'name' => '_sipfederationtls._tcp'], ['type' => 'SRV', 'name' => '_autodiscover._tcp'],
+    ['type' => 'SRV', 'name' => '_submissions._tcp'], ['type' => 'SRV', 'name' => '_imaps._tcp'],
+];
+
+// DNS Checks - Email and DKIM records
+const DNS_CHECKS_EMAIL = [
+    // Email authentication - DMARC, MTA-STS, TLS-RPT, BIMI
+    ['type' => 'TXT', 'name' => '_dmarc'], ['type' => 'TXT', 'name' => '_mta-sts'], ['type' => 'CNAME', 'name' => 'mta-sts'],
+    ['type' => 'TXT', 'name' => '_smtp._tls'], ['type' => 'TXT', 'name' => 'default._bimi'],
+    // DKIM selectors - Common
+    ['type' => 'TXT', 'name' => 'google._domainkey'], ['type' => 'TXT', 'name' => 'default._domainkey'],
+    ['type' => 'TXT', 'name' => 'k1._domainkey'], ['type' => 'TXT', 'name' => 'k2._domainkey'], ['type' => 'TXT', 'name' => 'k3._domainkey'],
+    ['type' => 'TXT', 'name' => 's1._domainkey'], ['type' => 'TXT', 'name' => 's2._domainkey'],
+    ['type' => 'TXT', 'name' => 'selector1._domainkey'], ['type' => 'TXT', 'name' => 'selector2._domainkey'],
+    ['type' => 'CNAME', 'name' => 'k1._domainkey'], ['type' => 'CNAME', 'name' => 's1._domainkey'],
+    ['type' => 'CNAME', 'name' => 'selector1._domainkey'], ['type' => 'CNAME', 'name' => 'selector2._domainkey'],
+    // DKIM selectors - Email service providers
+    ['type' => 'TXT', 'name' => 'mandrill._domainkey'], ['type' => 'CNAME', 'name' => 'mandrill._domainkey'],
+    ['type' => 'TXT', 'name' => 'mxvault._domainkey'], ['type' => 'CNAME', 'name' => 'mxvault._domainkey'],
+    ['type' => 'TXT', 'name' => 'postmark._domainkey'], ['type' => 'CNAME', 'name' => 'postmark._domainkey'],
+    ['type' => 'TXT', 'name' => 'pm._domainkey'], ['type' => 'CNAME', 'name' => 'pm._domainkey'],
+    ['type' => 'TXT', 'name' => 'mailjet._domainkey'], ['type' => 'CNAME', 'name' => 'mailjet._domainkey'],
+    ['type' => 'TXT', 'name' => 'sendgrid._domainkey'], ['type' => 'CNAME', 'name' => 'sendgrid._domainkey'],
+    ['type' => 'TXT', 'name' => 'smtpapi._domainkey'], ['type' => 'CNAME', 'name' => 'smtpapi._domainkey'],
+    ['type' => 'CNAME', 'name' => 's1._domainkey'], ['type' => 'CNAME', 'name' => 's2._domainkey'],
+    ['type' => 'TXT', 'name' => 'amazonses._domainkey'], ['type' => 'CNAME', 'name' => 'amazonses._domainkey'],
+    ['type' => 'TXT', 'name' => 'sparkpost._domainkey'], ['type' => 'CNAME', 'name' => 'sparkpost._domainkey'],
+    ['type' => 'TXT', 'name' => 'cm._domainkey'], ['type' => 'CNAME', 'name' => 'cm._domainkey'],
+    ['type' => 'TXT', 'name' => 'dkim._domainkey'], ['type' => 'CNAME', 'name' => 'dkim._domainkey'],
+    ['type' => 'TXT', 'name' => 'mail._domainkey'], ['type' => 'CNAME', 'name' => 'mail._domainkey'],
+    ['type' => 'TXT', 'name' => 'zendesk1._domainkey'], ['type' => 'TXT', 'name' => 'zendesk2._domainkey'],
+    ['type' => 'CNAME', 'name' => 'zendesk1._domainkey'], ['type' => 'CNAME', 'name' => 'zendesk2._domainkey'],
+    ['type' => 'TXT', 'name' => 'mailgun._domainkey'], ['type' => 'CNAME', 'name' => 'mailgun._domainkey'],
+    ['type' => 'TXT', 'name' => 'krs._domainkey'], ['type' => 'CNAME', 'name' => 'krs._domainkey'],
+    ['type' => 'TXT', 'name' => 'protonmail._domainkey'], ['type' => 'TXT', 'name' => 'protonmail2._domainkey'], ['type' => 'TXT', 'name' => 'protonmail3._domainkey'],
+    // Mailgun subdomain
+    ['type' => 'MX', 'name' => 'mg'], ['type' => 'CNAME', 'name' => 'email.mg'],
+    ['type' => 'TXT', 'name' => 'smtp._domainkey.mg'], ['type' => 'TXT', 'name' => 'mg'],
+    // Other email/verification records
+    ['type' => 'TXT', 'name' => '_amazonses'], ['type' => 'TXT', 'name' => '_mailchannels'],
+    ['type' => 'TXT', 'name' => 'zmail._domainkey'], ['type' => 'TXT', 'name' => 'zoho._domainkey'],
+    // ACME/Let's Encrypt
+    ['type' => 'CNAME', 'name' => '_acme-challenge'], ['type' => 'TXT', 'name' => '_acme-challenge'],
+    // Domain verification records
+    ['type' => 'TXT', 'name' => '_google'], ['type' => 'TXT', 'name' => '_github-challenge'],
+    ['type' => 'TXT', 'name' => '_facebook'], ['type' => 'TXT', 'name' => '_dnslink']
+];
+
 // --- DATABASE SETUP ---
 $db_path = getenv('PERISCOPE_DB') ?: __DIR__ . '/history.db';
 $pdo = null;
@@ -195,44 +318,6 @@ function normalizeInput($input) {
 }
 
 function extractRootDomain($host) {
-    // List of multi-part TLDs (add more as needed)
-    $multiPartTlds = [
-        'co.uk', 'org.uk', 'me.uk', 'ac.uk', 'gov.uk', 'net.uk', 'sch.uk',
-        'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'asn.au', 'id.au',
-        'co.nz', 'net.nz', 'org.nz', 'govt.nz', 'ac.nz', 'school.nz',
-        'co.za', 'org.za', 'web.za', 'net.za', 'gov.za',
-        'com.br', 'net.br', 'org.br', 'gov.br', 'edu.br',
-        'co.jp', 'or.jp', 'ne.jp', 'ac.jp', 'go.jp',
-        'co.kr', 'or.kr', 'ne.kr', 'go.kr', 're.kr',
-        'com.cn', 'net.cn', 'org.cn', 'gov.cn', 'edu.cn',
-        'com.tw', 'net.tw', 'org.tw', 'gov.tw', 'edu.tw',
-        'com.hk', 'net.hk', 'org.hk', 'gov.hk', 'edu.hk',
-        'com.sg', 'net.sg', 'org.sg', 'gov.sg', 'edu.sg',
-        'co.in', 'net.in', 'org.in', 'gov.in', 'ac.in', 'res.in',
-        'com.mx', 'net.mx', 'org.mx', 'gob.mx', 'edu.mx',
-        'com.ar', 'net.ar', 'org.ar', 'gov.ar', 'edu.ar',
-        'co.il', 'org.il', 'net.il', 'ac.il', 'gov.il',
-        'com.tr', 'net.tr', 'org.tr', 'gov.tr', 'edu.tr',
-        'com.pl', 'net.pl', 'org.pl', 'gov.pl', 'edu.pl',
-        'co.id', 'or.id', 'web.id', 'ac.id', 'go.id',
-        'com.my', 'net.my', 'org.my', 'gov.my', 'edu.my',
-        'com.ph', 'net.ph', 'org.ph', 'gov.ph', 'edu.ph',
-        'com.vn', 'net.vn', 'org.vn', 'gov.vn', 'edu.vn',
-        'co.th', 'or.th', 'ac.th', 'go.th', 'in.th',
-        'com.ua', 'net.ua', 'org.ua', 'gov.ua', 'edu.ua',
-        'com.ru', 'net.ru', 'org.ru', 'gov.ru', 'edu.ru',
-        'com.de', 'org.de',
-        'co.at', 'or.at', 'ac.at',
-        'com.es', 'org.es', 'nom.es', 'gob.es', 'edu.es',
-        'com.pt', 'org.pt', 'gov.pt', 'edu.pt',
-        'co.it', 'org.it', 'gov.it', 'edu.it',
-        'co.fr', 'asso.fr', 'nom.fr', 'gouv.fr',
-        'co.nl', 'org.nl',
-        'co.be', 'org.be',
-        'eu.com', 'us.com', 'gb.com', 'uk.com', 'de.com', 'jpn.com', 'kr.com', 'cn.com',
-        'eu.org', 'us.org',
-    ];
-
     $parts = explode('.', $host);
     $numParts = count($parts);
 
@@ -242,7 +327,7 @@ function extractRootDomain($host) {
 
     // Check for multi-part TLDs
     $lastTwo = $parts[$numParts - 2] . '.' . $parts[$numParts - 1];
-    if (in_array($lastTwo, $multiPartTlds)) {
+    if (in_array($lastTwo, MULTI_PART_TLDS)) {
         // Root is last 3 parts (e.g., example.co.uk)
         if ($numParts >= 3) {
             return $parts[$numParts - 3] . '.' . $lastTwo;
@@ -1491,7 +1576,8 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
             break;
         }
     }
-    if ($changePassStatus >= 200 && $changePassStatus < 500) {
+    // Only consider it present if status is 200 OK or 3xx Redirect (strictly less than 400)
+    if ($changePassStatus >= 200 && $changePassStatus < 400) {
         $result['change_password'] = [
             'present' => true,
             'status' => $changePassStatus,
@@ -1897,73 +1983,146 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
     return $data;
 }
 
-function performLookup($domain) {
-    $errors = []; $raw_records = []; $check_map = [];
+// Helper function to process DNS checks with deduplication
+function processDnsChecks($checks, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, &$check_map, &$raw_records) {
+    foreach ($checks as $check) {
+        $type = $check['type']; $name = $check['name'];
 
-    // Normalize input and extract target host vs root domain
+        // Skip subdomain A record checks if wildcard A exists
+        if ($hasWildcardA && $type === 'A' && !empty($name) && $name !== 'www') {
+            continue;
+        }
+
+        $host = $name ? "$name.$rootDomain" : $rootDomain;
+
+        // Check for CNAME before A/AAAA/TXT queries
+        if (($type === 'A' || $type === 'AAAA' || $type === 'TXT') && !empty($name) && $type !== 'CNAME') {
+            $cnameOutput = digQuery('CNAME', $host);
+            if ($cnameOutput && !empty(trim($cnameOutput))) {
+                $cnameVal = trim(explode("\n", trim($cnameOutput))[0]);
+                if ($wildcardCNAMEValue !== null && $cnameVal === $wildcardCNAMEValue) continue;
+                $key = "CNAME|$name|$cnameVal";
+                if (!isset($check_map[$key])) {
+                    $check_map[$key] = true;
+                    $raw_records[] = ['type' => 'CNAME', 'name' => $name, 'value' => $cnameVal];
+                }
+                continue;
+            }
+        }
+
+        $output = digQuery($type, $host);
+        if (!$output) continue;
+        foreach (explode("\n", trim($output)) as $val) {
+            $val = trim($val); if (empty($val)) continue;
+            if (($type === 'A' || $type === 'AAAA') && preg_match('/[a-zA-Z]/', $val)) continue;
+            if ($type === 'TXT' && $wildcardTXTValue !== null && !empty($name) && $val === $wildcardTXTValue) continue;
+            if ($wildcardCNAMEValue !== null && !empty($name) && $name !== '*' && $val === $wildcardCNAMEValue) continue;
+            
+            $key = "$type|$name|$val"; if (isset($check_map[$key])) continue;
+            $check_map[$key] = true;
+            $raw_records[] = ['type' => $type, 'name' => $name ?: '@', 'value' => $val];
+        }
+    }
+}
+
+// Helper function to add metadata storage flags
+function addMetadataStorageFlags(&$metadata, $metadataRawFiles) {
+    $fields = [
+        'robots_txt' => 'robots_txt',
+        'sitemap' => 'sitemap_xml',
+        'security_txt' => 'security_txt',
+        'ads_txt' => 'ads_txt',
+        'app_ads_txt' => 'app_ads_txt',
+        'app_site_association' => 'app_site_association',
+        'assetlinks' => 'assetlinks',
+        'manifest' => 'manifest',
+        'humans_txt' => 'humans_txt',
+        'browserconfig' => 'browserconfig',
+        'keybase_txt' => 'keybase_txt'
+    ];
+    foreach ($fields as $key => $rawKey) {
+        if (isset($metadata[$key]) && $metadata[$key] && $metadata[$key]['present']) {
+            $metadata[$key]['raw_stored'] = !empty($metadataRawFiles[$rawKey]);
+        }
+    }
+    if (isset($metadata['favicon']) && $metadata['favicon'] && $metadata['favicon']['present'] && isset($metadata['favicon']['hash'])) {
+        $metadata['favicon']['raw_stored'] = !empty($metadataRawFiles['favicon']);
+    }
+}
+
+/**
+ * Unified domain lookup function
+ * @param string $domain Domain to scan
+ * @param array $options Options: 'sse' (bool) for SSE progress, 'save_db' (bool) to save to history DB
+ * @return array Scan results
+ */
+function performLookup($domain, $options = []) {
+    global $pdo;
+    $useSSE = $options['sse'] ?? false;
+    $saveDB = $options['save_db'] ?? false;
+    $totalSteps = 7;
+    $currentStep = 0;
+
+    // Progress reporting closures
+    $progress = $useSSE
+        ? function($msg) use (&$currentStep, $totalSteps) { sendProgress(++$currentStep, $totalSteps, $msg); }
+        : function($msg) { cliProgress($msg); };
+    $progressDone = $useSSE
+        ? function($msg) {} // SSE doesn't need "done" messages
+        : function($msg) { cliProgressDone($msg); };
+
+    $raw_records = []; $check_map = [];
+
+    // Normalize input
     $targetHost = normalizeInput($domain);
     $rootDomain = extractRootDomain($targetHost);
     $isSubdomain = ($targetHost !== $rootDomain);
 
-    // SAFETY CHECK: Abort if domain is empty or invalid
+    // Validate domain
     if (empty($targetHost) || empty($rootDomain) || !preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i', $targetHost)) {
+        if ($useSSE) {
+            sendError('Invalid or empty domain provided');
+            return ['error' => 'Invalid or empty domain'];
+        }
         return ['error' => 'Invalid or empty domain', 'domain' => [], 'dns_records' => [], 'zone' => '', 'errors' => ['Invalid domain provided']];
     }
 
-    cliProgress('Checking domain registration...');
-    
-    // Check if domain exists via RDAP
+    // Phase 1: Check domain registration
+    $progress('Checking domain registration...');
     $domainCheck = checkDomainExists($rootDomain);
-    
+
     if (!$domainCheck['exists']) {
-        cliProgressDone('Domain not registered');
+        $progressDone('Domain not registered');
         $timestamp = time();
         $result = [
-            'target_host' => $targetHost,
-            'root_domain' => $rootDomain,
-            'is_subdomain' => $isSubdomain,
-            'domain_exists' => false,
-            'domain' => [],
-            'dns_records' => [],
-            'zone' => '',
-            'ip_lookup' => [],
-            'http_headers' => [],
-            'ssl' => [],
-            'cms' => [],
-            'infrastructure' => [],
-            'security' => [],
-            'technology' => [],
-            'metadata' => [],
-            'redirect_chain' => [],
-            'indexability' => [],
-            'errors' => [],
-            'timestamp' => $timestamp,
-            'raw_available' => false,
-            'plugin_version' => PERISCOPE_VERSION
+            'target_host' => $targetHost, 'root_domain' => $rootDomain, 'is_subdomain' => $isSubdomain,
+            'domain_exists' => false, 'domain' => [], 'dns_records' => [], 'zone' => '',
+            'ip_lookup' => [], 'http_headers' => [], 'ssl' => [], 'cms' => [],
+            'infrastructure' => [], 'security' => [], 'technology' => [], 'metadata' => [],
+            'redirect_chain' => [], 'indexability' => [], 'errors' => [],
+            'timestamp' => $timestamp, 'raw_available' => false, 'plugin_version' => PERISCOPE_VERSION
         ];
-        
-        // Save response cache so it can be loaded from history
         $scanPath = getScanPath($targetHost, $timestamp);
         if (!is_dir($scanPath)) mkdir($scanPath, 0755, true);
         saveResponseCache($scanPath, $result);
-        
+        if ($saveDB && $pdo) {
+            $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')");
+            $stmt->execute([$targetHost, $timestamp]);
+        }
         return $result;
     }
-    
-    // Store RDAP result for later use
+
     $cachedRdap = $domainCheck['rdap'] ?? null;
 
-    cliProgress('Scanning DNS records...');
+    // Phase 2: Core DNS records
+    $progress('Scanning core DNS records...');
 
-    // Check for wildcard A record on root domain
+    // Check wildcards
     $wildcardA = digQuery('A', "*.$rootDomain");
     $hasWildcardA = !empty(trim($wildcardA));
-
-    // If wildcard A exists, record it
     if ($hasWildcardA) {
         foreach (explode("\n", trim($wildcardA)) as $val) {
             $val = trim($val); if (empty($val)) continue;
-            // Skip if it looks like a hostname (CNAME target returned by dig)
             if (preg_match('/[a-zA-Z]/', $val) && substr($val, -1) === '.') continue;
             $key = "A|*|$val"; if (isset($check_map[$key])) continue;
             $check_map[$key] = true;
@@ -1971,12 +2130,10 @@ function performLookup($domain) {
         }
     }
 
-    // Check for wildcard TXT record on root domain
     $wildcardTXT = digQuery('TXT', "*.$rootDomain");
     $wildcardTXTValue = null;
     if (!empty(trim($wildcardTXT))) {
         $wildcardTXTValue = trim($wildcardTXT);
-        // Record the wildcard TXT
         $key = "TXT|*|$wildcardTXTValue";
         if (!isset($check_map[$key])) {
             $check_map[$key] = true;
@@ -1984,12 +2141,10 @@ function performLookup($domain) {
         }
     }
 
-    // Check for wildcard CNAME record on root domain
     $wildcardCNAME = digQuery('CNAME', "*.$rootDomain");
     $wildcardCNAMEValue = null;
     if (!empty(trim($wildcardCNAME))) {
         $wildcardCNAMEValue = trim(explode("\n", trim($wildcardCNAME))[0]);
-        // Record the wildcard CNAME
         $key = "CNAME|*|$wildcardCNAMEValue";
         if (!isset($check_map[$key])) {
             $check_map[$key] = true;
@@ -1997,97 +2152,7 @@ function performLookup($domain) {
         }
     }
 
-    $checks = [
-        // Core records (skip wildcard since we already checked it)
-        ['type' => 'A', 'name' => ''], ['type' => 'A', 'name' => 'www'],
-        ['type' => 'AAAA', 'name' => ''], ['type' => 'AAAA', 'name' => 'www'],
-        ['type' => 'NS', 'name' => ''], ['type' => 'SOA', 'name' => ''], ['type' => 'MX', 'name' => ''], ['type' => 'TXT', 'name' => ''],
-        ['type' => 'CAA', 'name' => ''],
-        ['type' => 'HTTPS', 'name' => ''], ['type' => 'SVCB', 'name' => ''],
-        ['type' => 'TLSA', 'name' => '_443._tcp'], ['type' => 'TLSA', 'name' => '_25._tcp'],
-
-        // Common subdomains
-        ['type' => 'A', 'name' => 'mail'], ['type' => 'A', 'name' => 'webmail'], ['type' => 'A', 'name' => 'smtp'],
-        ['type' => 'A', 'name' => 'imap'], ['type' => 'A', 'name' => 'ftp'], ['type' => 'A', 'name' => 'cpanel'],
-        ['type' => 'A', 'name' => 'whm'], ['type' => 'A', 'name' => 'plesk'], ['type' => 'A', 'name' => 'blog'],
-        ['type' => 'A', 'name' => 'shop'], ['type' => 'A', 'name' => 'portal'], ['type' => 'A', 'name' => 'dev'],
-        ['type' => 'A', 'name' => 'api'], ['type' => 'A', 'name' => 'app'], ['type' => 'A', 'name' => 'remote'],
-        ['type' => 'A', 'name' => 'vpn'],
-
-        // Additional subdomains
-        ['type' => 'A', 'name' => 'staging'], ['type' => 'A', 'name' => 'stage'],
-        ['type' => 'A', 'name' => 'test'], ['type' => 'A', 'name' => 'testing'],
-        ['type' => 'A', 'name' => 'uat'], ['type' => 'A', 'name' => 'demo'],
-        ['type' => 'A', 'name' => 'admin'], ['type' => 'A', 'name' => 'administrator'],
-        ['type' => 'A', 'name' => 'dashboard'], ['type' => 'A', 'name' => 'panel'],
-        ['type' => 'A', 'name' => 'login'], ['type' => 'A', 'name' => 'signin'],
-        ['type' => 'A', 'name' => 'auth'], ['type' => 'A', 'name' => 'sso'], ['type' => 'A', 'name' => 'oauth'],
-        ['type' => 'A', 'name' => 'secure'], ['type' => 'A', 'name' => 'ssl'],
-        ['type' => 'A', 'name' => 'static'], ['type' => 'A', 'name' => 'assets'], ['type' => 'A', 'name' => 'img'], ['type' => 'A', 'name' => 'images'],
-        ['type' => 'A', 'name' => 'media'], ['type' => 'A', 'name' => 'files'], ['type' => 'A', 'name' => 'downloads'],
-        ['type' => 'A', 'name' => 'docs'], ['type' => 'A', 'name' => 'documentation'],
-        ['type' => 'A', 'name' => 'support'], ['type' => 'A', 'name' => 'help'], ['type' => 'A', 'name' => 'kb'],
-        ['type' => 'A', 'name' => 'beta'], ['type' => 'A', 'name' => 'alpha'], ['type' => 'A', 'name' => 'sandbox'],
-        ['type' => 'A', 'name' => 'internal'], ['type' => 'A', 'name' => 'intranet'],
-        ['type' => 'A', 'name' => 'gateway'], ['type' => 'A', 'name' => 'proxy'],
-        ['type' => 'A', 'name' => 'git'], ['type' => 'A', 'name' => 'gitlab'], ['type' => 'A', 'name' => 'jenkins'], ['type' => 'A', 'name' => 'ci'],
-
-        // Microsoft / Office 365
-        ['type' => 'CNAME', 'name' => 'cdn'], ['type' => 'CNAME', 'name' => 'status'],
-        ['type' => 'CNAME', 'name' => 'autodiscover'], ['type' => 'CNAME', 'name' => 'lyncdiscover'], ['type' => 'CNAME', 'name' => 'sip'],
-        ['type' => 'CNAME', 'name' => 'enterpriseregistration'], ['type' => 'CNAME', 'name' => 'enterpriseenrollment'], ['type' => 'CNAME', 'name' => 'msoid'],
-        ['type' => 'SRV', 'name' => '_sip._tls'], ['type' => 'SRV', 'name' => '_sipfederationtls._tcp'], ['type' => 'SRV', 'name' => '_autodiscover._tcp'],
-        ['type' => 'SRV', 'name' => '_submissions._tcp'], ['type' => 'SRV', 'name' => '_imaps._tcp'],
-
-        // Email authentication - DMARC, MTA-STS, TLS-RPT, BIMI
-        ['type' => 'TXT', 'name' => '_dmarc'], ['type' => 'TXT', 'name' => '_mta-sts'], ['type' => 'CNAME', 'name' => 'mta-sts'],
-        ['type' => 'TXT', 'name' => '_smtp._tls'], ['type' => 'TXT', 'name' => 'default._bimi'],
-
-        // DKIM selectors - Common
-        ['type' => 'TXT', 'name' => 'google._domainkey'], ['type' => 'TXT', 'name' => 'default._domainkey'],
-        ['type' => 'TXT', 'name' => 'k1._domainkey'], ['type' => 'TXT', 'name' => 'k2._domainkey'], ['type' => 'TXT', 'name' => 'k3._domainkey'],
-        ['type' => 'TXT', 'name' => 's1._domainkey'], ['type' => 'TXT', 'name' => 's2._domainkey'],
-        ['type' => 'TXT', 'name' => 'selector1._domainkey'], ['type' => 'TXT', 'name' => 'selector2._domainkey'],
-        ['type' => 'CNAME', 'name' => 'k1._domainkey'], ['type' => 'CNAME', 'name' => 's1._domainkey'],
-        ['type' => 'CNAME', 'name' => 'selector1._domainkey'], ['type' => 'CNAME', 'name' => 'selector2._domainkey'],
-
-        // DKIM selectors - Email service providers
-        ['type' => 'TXT', 'name' => 'mandrill._domainkey'], ['type' => 'CNAME', 'name' => 'mandrill._domainkey'],
-        ['type' => 'TXT', 'name' => 'mxvault._domainkey'], ['type' => 'CNAME', 'name' => 'mxvault._domainkey'],
-        ['type' => 'TXT', 'name' => 'postmark._domainkey'], ['type' => 'CNAME', 'name' => 'postmark._domainkey'],
-        ['type' => 'TXT', 'name' => 'pm._domainkey'], ['type' => 'CNAME', 'name' => 'pm._domainkey'],
-        ['type' => 'TXT', 'name' => 'mailjet._domainkey'], ['type' => 'CNAME', 'name' => 'mailjet._domainkey'],
-        ['type' => 'TXT', 'name' => 'sendgrid._domainkey'], ['type' => 'CNAME', 'name' => 'sendgrid._domainkey'],
-        ['type' => 'TXT', 'name' => 'smtpapi._domainkey'], ['type' => 'CNAME', 'name' => 'smtpapi._domainkey'],
-        ['type' => 'CNAME', 'name' => 's1._domainkey'], ['type' => 'CNAME', 'name' => 's2._domainkey'],
-        ['type' => 'TXT', 'name' => 'amazonses._domainkey'], ['type' => 'CNAME', 'name' => 'amazonses._domainkey'],
-        ['type' => 'TXT', 'name' => 'sparkpost._domainkey'], ['type' => 'CNAME', 'name' => 'sparkpost._domainkey'],
-        ['type' => 'TXT', 'name' => 'cm._domainkey'], ['type' => 'CNAME', 'name' => 'cm._domainkey'],
-        ['type' => 'TXT', 'name' => 'dkim._domainkey'], ['type' => 'CNAME', 'name' => 'dkim._domainkey'],
-        ['type' => 'TXT', 'name' => 'mail._domainkey'], ['type' => 'CNAME', 'name' => 'mail._domainkey'],
-        ['type' => 'TXT', 'name' => 'zendesk1._domainkey'], ['type' => 'TXT', 'name' => 'zendesk2._domainkey'],
-        ['type' => 'CNAME', 'name' => 'zendesk1._domainkey'], ['type' => 'CNAME', 'name' => 'zendesk2._domainkey'],
-        ['type' => 'TXT', 'name' => 'mailgun._domainkey'], ['type' => 'CNAME', 'name' => 'mailgun._domainkey'],
-        ['type' => 'TXT', 'name' => 'krs._domainkey'], ['type' => 'CNAME', 'name' => 'krs._domainkey'],
-        ['type' => 'TXT', 'name' => 'protonmail._domainkey'], ['type' => 'TXT', 'name' => 'protonmail2._domainkey'], ['type' => 'TXT', 'name' => 'protonmail3._domainkey'],
-
-        // Mailgun subdomain
-        ['type' => 'MX', 'name' => 'mg'], ['type' => 'CNAME', 'name' => 'email.mg'],
-        ['type' => 'TXT', 'name' => 'smtp._domainkey.mg'], ['type' => 'TXT', 'name' => 'mg'],
-
-        // Other email/verification records
-        ['type' => 'TXT', 'name' => '_amazonses'], ['type' => 'TXT', 'name' => '_mailchannels'],
-        ['type' => 'TXT', 'name' => 'zmail._domainkey'], ['type' => 'TXT', 'name' => 'zoho._domainkey'],
-
-        // ACME/Let's Encrypt
-        ['type' => 'CNAME', 'name' => '_acme-challenge'], ['type' => 'TXT', 'name' => '_acme-challenge'],
-
-        // Domain verification records
-        ['type' => 'TXT', 'name' => '_google'], ['type' => 'TXT', 'name' => '_github-challenge'],
-        ['type' => 'TXT', 'name' => '_facebook'], ['type' => 'TXT', 'name' => '_dnslink']
-    ];
-
-    // If scanning a subdomain, first check DNS for the target host specifically
+    // If subdomain, check its DNS first
     if ($isSubdomain) {
         $subdomainPart = str_replace('.' . $rootDomain, '', $targetHost);
         foreach (['A', 'AAAA', 'CNAME'] as $type) {
@@ -2102,63 +2167,14 @@ function performLookup($domain) {
         }
     }
 
-    foreach ($checks as $check) {
-        $type = $check['type']; $name = $check['name'];
+    // Process core DNS checks
+    processDnsChecks(DNS_CHECKS_CORE, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, $check_map, $raw_records);
 
-        // Skip subdomain A record checks if wildcard A exists (they would all match wildcard)
-        if ($hasWildcardA && $type === 'A' && !empty($name) && $name !== 'www') {
-            continue;
-        }
+    // Phase 3: Email & DKIM records
+    $progress('Scanning email & DKIM records...');
+    processDnsChecks(DNS_CHECKS_EMAIL, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, $check_map, $raw_records);
 
-        // DNS queries are relative to root domain
-        $host = $name ? "$name.$rootDomain" : $rootDomain;
-
-        // For subdomain A/AAAA/TXT checks: first check if CNAME exists, record it and skip the query
-        // (dig follows CNAMEs and returns records from the target, which we don't want)
-        if (($type === 'A' || $type === 'AAAA' || $type === 'TXT') && !empty($name) && $type !== 'CNAME') {
-            $cnameOutput = digQuery('CNAME', $host);
-            if ($cnameOutput && !empty(trim($cnameOutput))) {
-                $cnameVal = trim(explode("\n", trim($cnameOutput))[0]);
-                // Skip if this matches the wildcard CNAME (duplicate from wildcard)
-                if ($wildcardCNAMEValue !== null && $cnameVal === $wildcardCNAMEValue) {
-                    continue;
-                }
-                $key = "CNAME|$name|$cnameVal";
-                if (!isset($check_map[$key])) {
-                    $check_map[$key] = true;
-                    $raw_records[] = ['type' => 'CNAME', 'name' => $name, 'value' => $cnameVal];
-                }
-                continue; // Skip the A/AAAA/TXT query since we found a CNAME
-            }
-        }
-
-        $output = digQuery($type, $host);
-        if (!$output) continue;
-        foreach (explode("\n", trim($output)) as $val) {
-            $val = trim($val); if (empty($val)) continue;
-
-            // For A/AAAA records: skip values that look like hostnames (CNAME targets returned by dig)
-            if (($type === 'A' || $type === 'AAAA') && preg_match('/[a-zA-Z]/', $val)) {
-                continue;
-            }
-
-            // Skip TXT records that match the wildcard TXT value (duplicates from wildcard)
-            if ($type === 'TXT' && $wildcardTXTValue !== null && !empty($name) && $val === $wildcardTXTValue) {
-                continue;
-            }
-
-            // Skip CNAME records that match the wildcard CNAME value (duplicates from wildcard)
-            if ($type === 'CNAME' && $wildcardCNAMEValue !== null && !empty($name) && $name !== '*' && $val === $wildcardCNAMEValue) {
-                continue;
-            }
-
-            $key = "$type|$name|$val"; if (isset($check_map[$key])) continue;
-            $check_map[$key] = true;
-            $raw_records[] = ['type' => $type, 'name' => $name ?: '@', 'value' => $val];
-        }
-    }
-
-    // CNAME Exclusivity Logic
+    // Build zone file
     $cname_hosts = [];
     foreach ($raw_records as $r) if ($r['type'] === 'CNAME') $cname_hosts[$r['name']] = true;
 
@@ -2187,51 +2203,39 @@ function performLookup($domain) {
     $builder = new AlignedBuilder();
     $builder->addRdataFormatter('TXT', 'specialTxtFormatter');
     $zoneFile = $builder->build($zone);
+    $progressDone('DNS records scanned (' . count($dns_records) . ' found)');
 
-    cliProgressDone('DNS records scanned (' . count($dns_records) . ' found)');
-    cliProgress('Resolving IP addresses...');
-
-    // Capture raw IP WHOIS data and PTR records - resolve IPs for the target host
+    // Phase 4: IP Resolution
+    $progress('Resolving IP addresses...');
     $ips = gethostbynamel($targetHost); $ip_lookup = []; $rawWhoisIps = []; $ptrRecords = [];
     if ($ips) foreach ($ips as $ip) {
         $rawIpWhois = shell_exec("whois " . escapeshellarg($ip));
         $rawWhoisIps[$ip] = $rawIpWhois;
-        // Extract summary line for display
         $res = '';
         if ($rawIpWhois) {
             foreach (explode("\n", $rawIpWhois) as $line) {
                 if (preg_match('/^(OrgName|NetName|Organization):\s*(.+)/i', $line, $m)) {
-                    $res = trim($m[0]);
-                    break;
+                    $res = trim($m[0]); break;
                 }
             }
         }
         $ip_lookup[$ip] = $res ?: 'N/A';
-        
-        // PTR (reverse DNS) lookup
         $ptr = trim(shell_exec("dig -x " . escapeshellarg($ip) . " +short 2>/dev/null") ?: '');
-        $ptr = rtrim($ptr, '.'); // Remove trailing dot
+        $ptr = rtrim($ptr, '.');
         if ($ptr && !empty($ptr)) {
-            // Verify forward match (PTR hostname should resolve back to this IP)
             $forwardIps = @gethostbynamel($ptr);
-            $forwardMatch = $forwardIps && in_array($ip, $forwardIps);
-            $ptrRecords[$ip] = [
-                'ptr' => $ptr,
-                'forward_match' => $forwardMatch
-            ];
+            $ptrRecords[$ip] = ['ptr' => $ptr, 'forward_match' => $forwardIps && in_array($ip, $forwardIps)];
         }
     }
+    $progressDone('IP addresses resolved (' . count($ip_lookup) . ' found)');
 
-    cliProgressDone('IP addresses resolved (' . count($ip_lookup) . ' found)');
-    cliProgress('Fetching HTTP headers & SSL...');
-
-    // Capture redirect chain - try HTTPS first, fallback to HTTP
+    // Phase 5: HTTP & SSL
+    $progress('Fetching HTTP headers & SSL...');
     $redirectChain = getRedirectChain("https://" . $targetHost);
     if (empty($redirectChain) || (count($redirectChain) === 1 && $redirectChain[0]['status_code'] === 0)) {
         $redirectChain = getRedirectChain("http://" . $targetHost);
     }
 
-    // Capture raw HTTP headers - from target host
     $headers = [];
     $h_out = shell_exec("curl -I -s -L --max-time 3 " . escapeshellarg("https://".$targetHost));
     if (!$h_out) $h_out = shell_exec("curl -I -s -L --max-time 2 " . escapeshellarg("http://".$targetHost));
@@ -2239,7 +2243,6 @@ function performLookup($domain) {
         if(strpos($line, ':')) { [$k, $v] = explode(':', $line, 2); $headers[trim($k)] = trim($v); }
     }
 
-    // Fetch HTML once for multiple detection functions - from target host
     $html = @file_get_contents("https://" . $targetHost, false, stream_context_create([
         'http' => ['timeout' => 3, 'ignore_errors' => true],
         'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
@@ -2248,25 +2251,18 @@ function performLookup($domain) {
         'http' => ['timeout' => 3, 'ignore_errors' => true]
     ]));
 
-    // Capture raw SSL output - from target host
     $rawSsl = getRawSSL($targetHost);
+    $progressDone('HTTP headers & SSL fetched');
 
-    cliProgressDone('HTTP headers & SSL fetched');
-    cliProgress('Looking up domain registration...');
-
-    // Capture raw WHOIS for domain - always from root domain
+    // Phase 6: Domain Registration
+    $progress('Looking up domain registration...');
     $rawWhoisDomain = getRawWhoisDomain($rootDomain);
-
-    // Use cached RDAP from domain existence check if available
     $rawRdap = $cachedRdap ?? getRawRdap($rootDomain);
-
-    // Get timestamp for this scan
     $timestamp = time();
+    $progressDone('Domain registration retrieved');
 
-    cliProgressDone('Domain registration retrieved');
-    cliProgress('Analyzing results...');
-
-    // Run detection functions - tech detection uses target host
+    // Analysis
+    $progress('Analyzing results...');
     $ssl = getSSLInfo($targetHost, $rawSsl);
     $cms = detectCMS($targetHost, $html, $headers);
     $infra = detectInfrastructure($headers);
@@ -2276,71 +2272,34 @@ function performLookup($domain) {
     $metadata = detectMetadata($targetHost, $html, $metadataRawFiles);
     $indexability = detectSearchEngineBlocking($html, $headers, $metadataRawFiles['robots_txt'] ?? null);
 
-    // Save raw files to disk - under target host
     $scanPath = getScanPath($targetHost, $timestamp);
     saveRawFiles($scanPath, $html, $headers, $rawWhoisDomain, $rawWhoisIps, $rawSsl, [
-        'records' => $dns_records,
-        'zone' => $zoneFile
+        'records' => $dns_records, 'zone' => $zoneFile
     ], $rawRdap, $metadataRawFiles, $redirectChain, $ptrRecords);
 
     $domainData = $rawRdap ? parseRdap($rawRdap) : [];
     if (empty($domainData)) $domainData = parseRawWhois($rawWhoisDomain);
 
-    // Add flags for which metadata files were captured
-    if ($metadata['robots_txt'] && $metadata['robots_txt']['present']) {
-        $metadata['robots_txt']['raw_stored'] = !empty($metadataRawFiles['robots_txt']);
-    }
-    if ($metadata['sitemap'] && $metadata['sitemap']['present']) {
-        $metadata['sitemap']['raw_stored'] = !empty($metadataRawFiles['sitemap_xml']);
-    }
-    if ($metadata['security_txt'] && $metadata['security_txt']['present']) {
-        $metadata['security_txt']['raw_stored'] = !empty($metadataRawFiles['security_txt']);
-    }
-    if ($metadata['ads_txt'] && $metadata['ads_txt']['present']) {
-        $metadata['ads_txt']['raw_stored'] = !empty($metadataRawFiles['ads_txt']);
-    }
-    if ($metadata['app_ads_txt'] && $metadata['app_ads_txt']['present']) {
-        $metadata['app_ads_txt']['raw_stored'] = !empty($metadataRawFiles['app_ads_txt']);
-    }
-    if ($metadata['app_site_association'] && $metadata['app_site_association']['present']) {
-        $metadata['app_site_association']['raw_stored'] = !empty($metadataRawFiles['app_site_association']);
-    }
-    if ($metadata['assetlinks'] && $metadata['assetlinks']['present']) {
-        $metadata['assetlinks']['raw_stored'] = !empty($metadataRawFiles['assetlinks']);
-    }
-    if ($metadata['manifest'] && $metadata['manifest']['present']) {
-        $metadata['manifest']['raw_stored'] = !empty($metadataRawFiles['manifest']);
-    }
-    if ($metadata['humans_txt'] && $metadata['humans_txt']['present']) {
-        $metadata['humans_txt']['raw_stored'] = !empty($metadataRawFiles['humans_txt']);
-    }
-    if ($metadata['browserconfig'] && $metadata['browserconfig']['present']) {
-        $metadata['browserconfig']['raw_stored'] = !empty($metadataRawFiles['browserconfig']);
-    }
-    if ($metadata['keybase_txt'] && $metadata['keybase_txt']['present']) {
-        $metadata['keybase_txt']['raw_stored'] = !empty($metadataRawFiles['keybase_txt']);
-    }
-    if ($metadata['favicon'] && $metadata['favicon']['present'] && isset($metadata['favicon']['hash'])) {
-        $metadata['favicon']['raw_stored'] = !empty($metadataRawFiles['favicon']);
-    }
+    addMetadataStorageFlags($metadata, $metadataRawFiles);
 
     $result = [
-        'target_host' => $targetHost,
-        'root_domain' => $rootDomain,
-        'is_subdomain' => $isSubdomain,
+        'target_host' => $targetHost, 'root_domain' => $rootDomain, 'is_subdomain' => $isSubdomain,
         'domain' => $domainData, 'dns_records' => $dns_records, 'zone' => $zoneFile,
-        'ip_lookup' => $ip_lookup, 'ptr_records' => $ptrRecords, 'http_headers' => $headers, 'ssl' => $ssl, 'cms' => $cms,
-        'infrastructure' => $infra, 'security' => $security, 'technology' => $technology,
-        'metadata' => $metadata, 'redirect_chain' => $redirectChain, 'indexability' => $indexability,
-        'errors' => [], 'timestamp' => $timestamp, 'raw_available' => true,
-        'plugin_version' => PERISCOPE_VERSION
+        'ip_lookup' => $ip_lookup, 'ptr_records' => $ptrRecords, 'http_headers' => $headers,
+        'ssl' => $ssl, 'cms' => $cms, 'infrastructure' => $infra, 'security' => $security,
+        'technology' => $technology, 'metadata' => $metadata, 'redirect_chain' => $redirectChain,
+        'indexability' => $indexability, 'errors' => [], 'timestamp' => $timestamp,
+        'raw_available' => true, 'plugin_version' => PERISCOPE_VERSION
     ];
 
-    // Save response cache for fast future loads
     saveResponseCache($scanPath, $result);
 
-    cliProgressDone('Scan complete');
+    if ($saveDB && $pdo) {
+        $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')");
+        $stmt->execute([$targetHost, $timestamp]);
+    }
 
+    $progressDone('Scan complete');
     return $result;
 }
 
@@ -2375,512 +2334,6 @@ function sendError($message) {
     flush();
 }
 
-// --- PHASED LOOKUP WITH PROGRESS ---
-function performLookupWithProgress($domain) {
-    global $pdo;
-    $errors = []; $raw_records = []; $check_map = [];
-    $total_steps = 6;
-
-    // === INPUT NORMALIZATION ===
-    // Normalize input and extract target host vs root domain
-    $targetHost = normalizeInput($domain);
-    $rootDomain = extractRootDomain($targetHost);
-    $isSubdomain = ($targetHost !== $rootDomain);
-
-    // SAFETY CHECK: Abort if domain is empty or invalid
-    if (empty($targetHost) || empty($rootDomain) || !preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i', $targetHost)) {
-        sendError('Invalid or empty domain provided');
-        return ['error' => 'Invalid or empty domain'];
-    }
-
-    // === PHASE 0: Check if domain exists via RDAP ===
-    sendProgress(1, $total_steps, 'Checking domain registration...');
-    $domainCheck = checkDomainExists($rootDomain);
-    
-    if (!$domainCheck['exists']) {
-        $timestamp = time();
-        $result = [
-            'target_host' => $targetHost,
-            'root_domain' => $rootDomain,
-            'is_subdomain' => $isSubdomain,
-            'domain_exists' => false,
-            'domain' => [],
-            'dns_records' => [],
-            'zone' => '',
-            'ip_lookup' => [],
-            'http_headers' => [],
-            'ssl' => [],
-            'cms' => [],
-            'infrastructure' => [],
-            'security' => [],
-            'technology' => [],
-            'metadata' => [],
-            'redirect_chain' => [],
-            'indexability' => [],
-            'errors' => [],
-            'timestamp' => $timestamp,
-            'raw_available' => false,
-            'plugin_version' => PERISCOPE_VERSION
-        ];
-        
-        // Save response cache so it can be loaded from history
-        $scanPath = getScanPath($targetHost, $timestamp);
-        if (!is_dir($scanPath)) mkdir($scanPath, 0755, true);
-        saveResponseCache($scanPath, $result);
-        
-        // Save to history database
-        if ($pdo) {
-            $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')");
-            $stmt->execute([$targetHost, $timestamp]);
-        }
-        
-        return $result;
-    }
-    
-    // Store RDAP result for later use (avoid duplicate request)
-    $cachedRdap = $domainCheck['rdap'] ?? null;
-
-    // === PHASE 1: Core DNS & Subdomains ===
-    sendProgress(1, $total_steps, 'Scanning core DNS records...');
-
-    // Check for wildcard A record on root domain
-    $wildcardA = digQuery('A', "*.$rootDomain");
-    $hasWildcardA = !empty(trim($wildcardA));
-
-    // If wildcard A exists, record it
-    if ($hasWildcardA) {
-        foreach (explode("\n", trim($wildcardA)) as $val) {
-            $val = trim($val); if (empty($val)) continue;
-            // Skip if it looks like a hostname (CNAME target returned by dig)
-            if (preg_match('/[a-zA-Z]/', $val) && substr($val, -1) === '.') continue;
-            $key = "A|*|$val"; if (isset($check_map[$key])) continue;
-            $check_map[$key] = true;
-            $raw_records[] = ['type' => 'A', 'name' => '*', 'value' => $val];
-        }
-    }
-
-    // Check for wildcard TXT record on root domain
-    $wildcardTXT = digQuery('TXT', "*.$rootDomain");
-    $wildcardTXTValue = null;
-    if (!empty(trim($wildcardTXT))) {
-        $wildcardTXTValue = trim($wildcardTXT);
-        // Record the wildcard TXT
-        $key = "TXT|*|$wildcardTXTValue";
-        if (!isset($check_map[$key])) {
-            $check_map[$key] = true;
-            $raw_records[] = ['type' => 'TXT', 'name' => '*', 'value' => $wildcardTXTValue];
-        }
-    }
-
-    // Check for wildcard CNAME record on root domain
-    $wildcardCNAME = digQuery('CNAME', "*.$rootDomain");
-    $wildcardCNAMEValue = null;
-    if (!empty(trim($wildcardCNAME))) {
-        $wildcardCNAMEValue = trim(explode("\n", trim($wildcardCNAME))[0]);
-        // Record the wildcard CNAME
-        $key = "CNAME|*|$wildcardCNAMEValue";
-        if (!isset($check_map[$key])) {
-            $check_map[$key] = true;
-            $raw_records[] = ['type' => 'CNAME', 'name' => '*', 'value' => $wildcardCNAMEValue];
-        }
-    }
-
-    $checks_core = [
-        // Core records (skip wildcard since we already checked it)
-        ['type' => 'A', 'name' => ''], ['type' => 'A', 'name' => 'www'],
-        ['type' => 'AAAA', 'name' => ''], ['type' => 'AAAA', 'name' => 'www'],
-        ['type' => 'NS', 'name' => ''], ['type' => 'SOA', 'name' => ''], ['type' => 'MX', 'name' => ''], ['type' => 'TXT', 'name' => ''],
-        ['type' => 'CAA', 'name' => ''],
-        ['type' => 'HTTPS', 'name' => ''], ['type' => 'SVCB', 'name' => ''],
-        ['type' => 'TLSA', 'name' => '_443._tcp'], ['type' => 'TLSA', 'name' => '_25._tcp'],
-
-        // Common subdomains
-        ['type' => 'A', 'name' => 'mail'], ['type' => 'A', 'name' => 'webmail'], ['type' => 'A', 'name' => 'smtp'],
-        ['type' => 'A', 'name' => 'imap'], ['type' => 'A', 'name' => 'ftp'], ['type' => 'A', 'name' => 'cpanel'],
-        ['type' => 'A', 'name' => 'whm'], ['type' => 'A', 'name' => 'plesk'], ['type' => 'A', 'name' => 'blog'],
-        ['type' => 'A', 'name' => 'shop'], ['type' => 'A', 'name' => 'portal'], ['type' => 'A', 'name' => 'dev'],
-        ['type' => 'A', 'name' => 'api'], ['type' => 'A', 'name' => 'app'], ['type' => 'A', 'name' => 'remote'],
-        ['type' => 'A', 'name' => 'vpn'],
-
-        // Additional subdomains
-        ['type' => 'A', 'name' => 'staging'], ['type' => 'A', 'name' => 'stage'],
-        ['type' => 'A', 'name' => 'test'], ['type' => 'A', 'name' => 'testing'],
-        ['type' => 'A', 'name' => 'uat'], ['type' => 'A', 'name' => 'demo'],
-        ['type' => 'A', 'name' => 'admin'], ['type' => 'A', 'name' => 'administrator'],
-        ['type' => 'A', 'name' => 'dashboard'], ['type' => 'A', 'name' => 'panel'],
-        ['type' => 'A', 'name' => 'login'], ['type' => 'A', 'name' => 'signin'],
-        ['type' => 'A', 'name' => 'auth'], ['type' => 'A', 'name' => 'sso'], ['type' => 'A', 'name' => 'oauth'],
-        ['type' => 'A', 'name' => 'secure'], ['type' => 'A', 'name' => 'ssl'],
-        ['type' => 'A', 'name' => 'static'], ['type' => 'A', 'name' => 'assets'], ['type' => 'A', 'name' => 'img'], ['type' => 'A', 'name' => 'images'],
-        ['type' => 'A', 'name' => 'media'], ['type' => 'A', 'name' => 'files'], ['type' => 'A', 'name' => 'downloads'],
-        ['type' => 'A', 'name' => 'docs'], ['type' => 'A', 'name' => 'documentation'],
-        ['type' => 'A', 'name' => 'support'], ['type' => 'A', 'name' => 'help'], ['type' => 'A', 'name' => 'kb'],
-        ['type' => 'A', 'name' => 'beta'], ['type' => 'A', 'name' => 'alpha'], ['type' => 'A', 'name' => 'sandbox'],
-        ['type' => 'A', 'name' => 'internal'], ['type' => 'A', 'name' => 'intranet'],
-        ['type' => 'A', 'name' => 'gateway'], ['type' => 'A', 'name' => 'proxy'],
-        ['type' => 'A', 'name' => 'git'], ['type' => 'A', 'name' => 'gitlab'], ['type' => 'A', 'name' => 'jenkins'], ['type' => 'A', 'name' => 'ci'],
-
-        // Microsoft / Office 365
-        ['type' => 'CNAME', 'name' => 'cdn'], ['type' => 'CNAME', 'name' => 'status'],
-        ['type' => 'CNAME', 'name' => 'autodiscover'], ['type' => 'CNAME', 'name' => 'lyncdiscover'], ['type' => 'CNAME', 'name' => 'sip'],
-        ['type' => 'CNAME', 'name' => 'enterpriseregistration'], ['type' => 'CNAME', 'name' => 'enterpriseenrollment'], ['type' => 'CNAME', 'name' => 'msoid'],
-        ['type' => 'SRV', 'name' => '_sip._tls'], ['type' => 'SRV', 'name' => '_sipfederationtls._tcp'], ['type' => 'SRV', 'name' => '_autodiscover._tcp'],
-        ['type' => 'SRV', 'name' => '_submissions._tcp'], ['type' => 'SRV', 'name' => '_imaps._tcp'],
-    ];
-
-    // If scanning a subdomain, first check DNS for the target host specifically
-    if ($isSubdomain) {
-        $subdomainPart = str_replace('.' . $rootDomain, '', $targetHost);
-        foreach (['A', 'AAAA', 'CNAME'] as $type) {
-            $output = digQuery($type, $targetHost);
-            if (!$output) continue;
-            foreach (explode("\n", trim($output)) as $val) {
-                $val = trim($val); if (empty($val)) continue;
-                $key = "$type|$subdomainPart|$val"; if (isset($check_map[$key])) continue;
-                $check_map[$key] = true;
-                $raw_records[] = ['type' => $type, 'name' => $subdomainPart, 'value' => $val];
-            }
-        }
-    }
-
-    foreach ($checks_core as $check) {
-        $type = $check['type']; $name = $check['name'];
-
-        // Skip subdomain A record checks if wildcard A exists (they would all match wildcard)
-        if ($hasWildcardA && $type === 'A' && !empty($name) && $name !== 'www') {
-            continue;
-        }
-
-        // DNS queries are relative to root domain
-        $host = $name ? "$name.$rootDomain" : $rootDomain;
-
-        // For subdomain A/AAAA/TXT checks: first check if CNAME exists, record it and skip the query
-        // (dig follows CNAMEs and returns records from the target, which we don't want)
-        if (($type === 'A' || $type === 'AAAA' || $type === 'TXT') && !empty($name) && $type !== 'CNAME') {
-            $cnameOutput = digQuery('CNAME', $host);
-            if ($cnameOutput && !empty(trim($cnameOutput))) {
-                $cnameVal = trim(explode("\n", trim($cnameOutput))[0]);
-                // Skip if this matches the wildcard CNAME (duplicate from wildcard)
-                if ($wildcardCNAMEValue !== null && $cnameVal === $wildcardCNAMEValue) {
-                    continue;
-                }
-                $key = "CNAME|$name|$cnameVal";
-                if (!isset($check_map[$key])) {
-                    $check_map[$key] = true;
-                    $raw_records[] = ['type' => 'CNAME', 'name' => $name, 'value' => $cnameVal];
-                }
-                continue; // Skip the A/AAAA/TXT query since we found a CNAME
-            }
-        }
-
-        $output = digQuery($type, $host);
-        if (!$output) continue;
-        foreach (explode("\n", trim($output)) as $val) {
-            $val = trim($val); if (empty($val)) continue;
-
-            // For A/AAAA records: skip values that look like hostnames (CNAME targets returned by dig)
-            if (($type === 'A' || $type === 'AAAA') && preg_match('/[a-zA-Z]/', $val)) {
-                continue;
-            }
-
-            // Skip TXT records that match the wildcard TXT value (duplicates from wildcard)
-            if ($type === 'TXT' && $wildcardTXTValue !== null && !empty($name) && $val === $wildcardTXTValue) {
-                continue;
-            }
-
-            $key = "$type|$name|$val"; if (isset($check_map[$key])) continue;
-            $check_map[$key] = true;
-            $raw_records[] = ['type' => $type, 'name' => $name ?: '@', 'value' => $val];
-        }
-    }
-
-    // === PHASE 2: Email & DKIM Records ===
-    sendProgress(2, $total_steps, 'Scanning email & DKIM records...');
-
-    $checks_email = [
-        // Email authentication - DMARC, MTA-STS, TLS-RPT, BIMI
-        ['type' => 'TXT', 'name' => '_dmarc'], ['type' => 'TXT', 'name' => '_mta-sts'], ['type' => 'CNAME', 'name' => 'mta-sts'],
-        ['type' => 'TXT', 'name' => '_smtp._tls'], ['type' => 'TXT', 'name' => 'default._bimi'],
-
-        // DKIM selectors - Common
-        ['type' => 'TXT', 'name' => 'google._domainkey'], ['type' => 'TXT', 'name' => 'default._domainkey'],
-        ['type' => 'TXT', 'name' => 'k1._domainkey'], ['type' => 'TXT', 'name' => 'k2._domainkey'], ['type' => 'TXT', 'name' => 'k3._domainkey'],
-        ['type' => 'TXT', 'name' => 's1._domainkey'], ['type' => 'TXT', 'name' => 's2._domainkey'],
-        ['type' => 'TXT', 'name' => 'selector1._domainkey'], ['type' => 'TXT', 'name' => 'selector2._domainkey'],
-        ['type' => 'CNAME', 'name' => 'k1._domainkey'], ['type' => 'CNAME', 'name' => 's1._domainkey'],
-        ['type' => 'CNAME', 'name' => 'selector1._domainkey'], ['type' => 'CNAME', 'name' => 'selector2._domainkey'],
-
-        // DKIM selectors - Email service providers
-        ['type' => 'TXT', 'name' => 'mandrill._domainkey'], ['type' => 'CNAME', 'name' => 'mandrill._domainkey'],
-        ['type' => 'TXT', 'name' => 'mxvault._domainkey'], ['type' => 'CNAME', 'name' => 'mxvault._domainkey'],
-        ['type' => 'TXT', 'name' => 'postmark._domainkey'], ['type' => 'CNAME', 'name' => 'postmark._domainkey'],
-        ['type' => 'TXT', 'name' => 'pm._domainkey'], ['type' => 'CNAME', 'name' => 'pm._domainkey'],
-        ['type' => 'TXT', 'name' => 'mailjet._domainkey'], ['type' => 'CNAME', 'name' => 'mailjet._domainkey'],
-        ['type' => 'TXT', 'name' => 'sendgrid._domainkey'], ['type' => 'CNAME', 'name' => 'sendgrid._domainkey'],
-        ['type' => 'TXT', 'name' => 'smtpapi._domainkey'], ['type' => 'CNAME', 'name' => 'smtpapi._domainkey'],
-        ['type' => 'CNAME', 'name' => 's1._domainkey'], ['type' => 'CNAME', 'name' => 's2._domainkey'],
-        ['type' => 'TXT', 'name' => 'amazonses._domainkey'], ['type' => 'CNAME', 'name' => 'amazonses._domainkey'],
-        ['type' => 'TXT', 'name' => 'sparkpost._domainkey'], ['type' => 'CNAME', 'name' => 'sparkpost._domainkey'],
-        ['type' => 'TXT', 'name' => 'cm._domainkey'], ['type' => 'CNAME', 'name' => 'cm._domainkey'],
-        ['type' => 'TXT', 'name' => 'dkim._domainkey'], ['type' => 'CNAME', 'name' => 'dkim._domainkey'],
-        ['type' => 'TXT', 'name' => 'mail._domainkey'], ['type' => 'CNAME', 'name' => 'mail._domainkey'],
-        ['type' => 'TXT', 'name' => 'zendesk1._domainkey'], ['type' => 'TXT', 'name' => 'zendesk2._domainkey'],
-        ['type' => 'CNAME', 'name' => 'zendesk1._domainkey'], ['type' => 'CNAME', 'name' => 'zendesk2._domainkey'],
-        ['type' => 'TXT', 'name' => 'mailgun._domainkey'], ['type' => 'CNAME', 'name' => 'mailgun._domainkey'],
-        ['type' => 'TXT', 'name' => 'krs._domainkey'], ['type' => 'CNAME', 'name' => 'krs._domainkey'],
-        ['type' => 'TXT', 'name' => 'protonmail._domainkey'], ['type' => 'TXT', 'name' => 'protonmail2._domainkey'], ['type' => 'TXT', 'name' => 'protonmail3._domainkey'],
-
-        // Mailgun subdomain
-        ['type' => 'MX', 'name' => 'mg'], ['type' => 'CNAME', 'name' => 'email.mg'],
-        ['type' => 'TXT', 'name' => 'smtp._domainkey.mg'], ['type' => 'TXT', 'name' => 'mg'],
-
-        // Other email/verification records
-        ['type' => 'TXT', 'name' => '_amazonses'], ['type' => 'TXT', 'name' => '_mailchannels'],
-        ['type' => 'TXT', 'name' => 'zmail._domainkey'], ['type' => 'TXT', 'name' => 'zoho._domainkey'],
-
-        // ACME/Let's Encrypt
-        ['type' => 'CNAME', 'name' => '_acme-challenge'], ['type' => 'TXT', 'name' => '_acme-challenge'],
-
-        // Domain verification records
-        ['type' => 'TXT', 'name' => '_google'], ['type' => 'TXT', 'name' => '_github-challenge'],
-        ['type' => 'TXT', 'name' => '_facebook'], ['type' => 'TXT', 'name' => '_dnslink']
-    ];
-
-    foreach ($checks_email as $check) {
-        $type = $check['type']; $name = $check['name'];
-        // Email/DKIM records are always on the root domain
-        $host = $name ? "$name.$rootDomain" : $rootDomain;
-
-        // For subdomain A/AAAA/TXT checks: first check if CNAME exists, record it and skip the query
-        // (dig follows CNAMEs and returns records from the target, which we don't want)
-        if (($type === 'A' || $type === 'AAAA' || $type === 'TXT') && !empty($name) && $type !== 'CNAME') {
-            $cnameOutput = digQuery('CNAME', $host);
-            if ($cnameOutput && !empty(trim($cnameOutput))) {
-                $cnameVal = trim(explode("\n", trim($cnameOutput))[0]);
-                // Skip if this matches the wildcard CNAME (duplicate from wildcard)
-                if ($wildcardCNAMEValue !== null && $cnameVal === $wildcardCNAMEValue) {
-                    continue;
-                }
-                $key = "CNAME|$name|$cnameVal";
-                if (!isset($check_map[$key])) {
-                    $check_map[$key] = true;
-                    $raw_records[] = ['type' => 'CNAME', 'name' => $name, 'value' => $cnameVal];
-                }
-                continue; // Skip the A/AAAA/TXT query since we found a CNAME
-            }
-        }
-
-        $output = digQuery($type, $host);
-        if (!$output) continue;
-        foreach (explode("\n", trim($output)) as $val) {
-            $val = trim($val); if (empty($val)) continue;
-
-            // For A/AAAA records: skip values that look like hostnames (CNAME targets returned by dig)
-            if (($type === 'A' || $type === 'AAAA') && preg_match('/[a-zA-Z]/', $val)) {
-                continue;
-            }
-
-            // Skip TXT records that match the wildcard TXT value (duplicates from wildcard)
-            if ($type === 'TXT' && $wildcardTXTValue !== null && !empty($name) && $val === $wildcardTXTValue) {
-                continue;
-            }
-
-            // Skip CNAME records that match the wildcard CNAME value (duplicates from wildcard)
-            if ($type === 'CNAME' && $wildcardCNAMEValue !== null && !empty($name) && $name !== '*' && $val === $wildcardCNAMEValue) {
-                continue;
-            }
-
-            $key = "$type|$name|$val"; if (isset($check_map[$key])) continue;
-            $check_map[$key] = true;
-            $raw_records[] = ['type' => $type, 'name' => $name ?: '@', 'value' => $val];
-        }
-    }
-
-    // CNAME Exclusivity Logic
-    $cname_hosts = [];
-    foreach ($raw_records as $r) if ($r['type'] === 'CNAME') $cname_hosts[$r['name']] = true;
-
-    $dns_records = [];
-    $zone = new Zone($rootDomain . ".");
-    $zone->setDefaultTtl(3600);
-
-    foreach ($raw_records as $r) {
-        if (isset($cname_hosts[$r['name']]) && $r['type'] !== 'CNAME') continue;
-        $dns_records[] = $r;
-        try {
-            $rr = new ResourceRecord(); $rr->setName($r['name']); $rr->setClass('IN');
-            switch ($r['type']) {
-                case 'A': $rr->setRdata(Factory::A($r['value'])); break;
-                case 'CNAME': $rr->setRdata(Factory::Cname($r['value'])); break;
-                case 'NS': $rr->setRdata(Factory::Ns($r['value'])); break;
-                case 'TXT': $rr->setRdata(Factory::Txt(trim($r['value'], '"'))); break;
-                case 'MX': $p = explode(' ', $r['value']); if(count($p)==2) $rr->setRdata(Factory::Mx($p[0], $p[1])); break;
-                case 'SOA': $p = explode(' ', $r['value']); if(count($p)>=7) $rr->setRdata(Factory::Soa($p[0],$p[1],$p[2],$p[3],$p[4],$p[5],$p[6])); break;
-                case 'SRV': $p = preg_split('/\s+/', $r['value']); if(count($p) >= 4) { $target = rtrim($p[3], '.'); $rr->setRdata(Factory::Srv((int)$p[0], (int)$p[1], (int)$p[2], $target)); } break;
-            }
-            $zone->addResourceRecord($rr);
-        } catch (Exception $e) {}
-    }
-
-    $builder = new AlignedBuilder();
-    $builder->addRdataFormatter('TXT', 'specialTxtFormatter');
-    $zoneFile = $builder->build($zone);
-
-    // === PHASE 3: IP Resolution & WHOIS ===
-    sendProgress(3, $total_steps, 'Resolving IP addresses...');
-
-    // Resolve IPs for the target host (not root domain)
-    $ips = gethostbynamel($targetHost); $ip_lookup = []; $rawWhoisIps = []; $ptrRecords = [];
-    if ($ips) foreach ($ips as $ip) {
-        $rawIpWhois = shell_exec("whois " . escapeshellarg($ip));
-        $rawWhoisIps[$ip] = $rawIpWhois;
-        $res = '';
-        if ($rawIpWhois) {
-            foreach (explode("\n", $rawIpWhois) as $line) {
-                if (preg_match('/^(OrgName|NetName|Organization):\s*(.+)/i', $line, $m)) {
-                    $res = trim($m[0]);
-                    break;
-                }
-            }
-        }
-        $ip_lookup[$ip] = $res ?: 'N/A';
-        
-        // PTR (reverse DNS) lookup
-        $ptr = trim(shell_exec("dig -x " . escapeshellarg($ip) . " +short 2>/dev/null") ?: '');
-        $ptr = rtrim($ptr, '.'); // Remove trailing dot
-        if ($ptr && !empty($ptr)) {
-            // Verify forward match (PTR hostname should resolve back to this IP)
-            $forwardIps = @gethostbynamel($ptr);
-            $forwardMatch = $forwardIps && in_array($ip, $forwardIps);
-            $ptrRecords[$ip] = [
-                'ptr' => $ptr,
-                'forward_match' => $forwardMatch
-            ];
-        }
-    }
-
-    // === PHASE 4: HTTP & SSL ===
-    sendProgress(4, $total_steps, 'Fetching HTTP headers & SSL...');
-
-    // Capture redirect chain - try HTTPS first, fallback to HTTP
-    $redirectChain = getRedirectChain("https://" . $targetHost);
-    if (empty($redirectChain) || (count($redirectChain) === 1 && $redirectChain[0]['status_code'] === 0)) {
-        $redirectChain = getRedirectChain("http://" . $targetHost);
-    }
-
-    // HTTP/HTML from the target host
-    $headers = [];
-    $h_out = shell_exec("curl -I -s -L --max-time 3 " . escapeshellarg("https://".$targetHost));
-    if (!$h_out) $h_out = shell_exec("curl -I -s -L --max-time 2 " . escapeshellarg("http://".$targetHost));
-    if($h_out) foreach(explode("\n", $h_out) as $line) {
-        if(strpos($line, ':')) { [$k, $v] = explode(':', $line, 2); $headers[trim($k)] = trim($v); }
-    }
-
-    $html = @file_get_contents("https://" . $targetHost, false, stream_context_create([
-        'http' => ['timeout' => 3, 'ignore_errors' => true],
-        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
-    ]));
-    if (!$html) $html = @file_get_contents("http://" . $targetHost, false, stream_context_create([
-        'http' => ['timeout' => 3, 'ignore_errors' => true]
-    ]));
-
-    // SSL from the target host
-    $rawSsl = getRawSSL($targetHost);
-
-    // === PHASE 5: Domain Registration ===
-    sendProgress(5, $total_steps, 'Looking up domain registration...');
-
-    // WHOIS/RDAP always from root domain (subdomain lookups usually fail)
-    $rawWhoisDomain = getRawWhoisDomain($rootDomain);
-    // Use cached RDAP from domain existence check if available
-    $rawRdap = $cachedRdap ?? getRawRdap($rootDomain);
-
-    // === PHASE 6: Analysis & Save ===
-    sendProgress(6, $total_steps, 'Analyzing results...');
-
-    $timestamp = time();
-
-    // Tech detection uses targetHost (the actual site being scanned)
-    $ssl = getSSLInfo($targetHost, $rawSsl);
-    $cms = detectCMS($targetHost, $html, $headers);
-    $infra = detectInfrastructure($headers);
-    $security = detectSecurityHeaders($headers);
-    $technology = detectTechnology($html, $headers);
-    $metadataRawFiles = [];
-    $metadata = detectMetadata($targetHost, $html, $metadataRawFiles);
-    $indexability = detectSearchEngineBlocking($html, $headers, $metadataRawFiles['robots_txt'] ?? null);
-
-    // Store scans under targetHost
-    $scanPath = getScanPath($targetHost, $timestamp);
-    saveRawFiles($scanPath, $html, $headers, $rawWhoisDomain, $rawWhoisIps, $rawSsl, [
-        'records' => $dns_records,
-        'zone' => $zoneFile
-    ], $rawRdap, $metadataRawFiles, $redirectChain, $ptrRecords);
-
-    $domainData = $rawRdap ? parseRdap($rawRdap) : [];
-    if (empty($domainData)) $domainData = parseRawWhois($rawWhoisDomain);
-
-    // Add flags for which metadata files were captured
-    if ($metadata['robots_txt'] && $metadata['robots_txt']['present']) {
-        $metadata['robots_txt']['raw_stored'] = !empty($metadataRawFiles['robots_txt']);
-    }
-    if ($metadata['sitemap'] && $metadata['sitemap']['present']) {
-        $metadata['sitemap']['raw_stored'] = !empty($metadataRawFiles['sitemap_xml']);
-    }
-    if ($metadata['security_txt'] && $metadata['security_txt']['present']) {
-        $metadata['security_txt']['raw_stored'] = !empty($metadataRawFiles['security_txt']);
-    }
-    if ($metadata['ads_txt'] && $metadata['ads_txt']['present']) {
-        $metadata['ads_txt']['raw_stored'] = !empty($metadataRawFiles['ads_txt']);
-    }
-    if ($metadata['app_ads_txt'] && $metadata['app_ads_txt']['present']) {
-        $metadata['app_ads_txt']['raw_stored'] = !empty($metadataRawFiles['app_ads_txt']);
-    }
-    if ($metadata['app_site_association'] && $metadata['app_site_association']['present']) {
-        $metadata['app_site_association']['raw_stored'] = !empty($metadataRawFiles['app_site_association']);
-    }
-    if ($metadata['assetlinks'] && $metadata['assetlinks']['present']) {
-        $metadata['assetlinks']['raw_stored'] = !empty($metadataRawFiles['assetlinks']);
-    }
-    if ($metadata['manifest'] && $metadata['manifest']['present']) {
-        $metadata['manifest']['raw_stored'] = !empty($metadataRawFiles['manifest']);
-    }
-    if ($metadata['humans_txt'] && $metadata['humans_txt']['present']) {
-        $metadata['humans_txt']['raw_stored'] = !empty($metadataRawFiles['humans_txt']);
-    }
-    if ($metadata['browserconfig'] && $metadata['browserconfig']['present']) {
-        $metadata['browserconfig']['raw_stored'] = !empty($metadataRawFiles['browserconfig']);
-    }
-    if ($metadata['keybase_txt'] && $metadata['keybase_txt']['present']) {
-        $metadata['keybase_txt']['raw_stored'] = !empty($metadataRawFiles['keybase_txt']);
-    }
-    if ($metadata['favicon'] && $metadata['favicon']['present'] && isset($metadata['favicon']['hash'])) {
-        $metadata['favicon']['raw_stored'] = !empty($metadataRawFiles['favicon']);
-    }
-
-    $result = [
-        'target_host' => $targetHost,
-        'root_domain' => $rootDomain,
-        'is_subdomain' => $isSubdomain,
-        'domain' => $domainData, 'dns_records' => $dns_records, 'zone' => $zoneFile,
-        'ip_lookup' => $ip_lookup, 'ptr_records' => $ptrRecords, 'http_headers' => $headers, 'ssl' => $ssl, 'cms' => $cms,
-        'infrastructure' => $infra, 'security' => $security, 'technology' => $technology,
-        'metadata' => $metadata, 'redirect_chain' => $redirectChain, 'indexability' => $indexability,
-        'errors' => [], 'timestamp' => $timestamp, 'raw_available' => true,
-        'plugin_version' => PERISCOPE_VERSION
-    ];
-
-    saveResponseCache($scanPath, $result);
-
-    // Save to history database using targetHost
-    if ($pdo) {
-        $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')");
-        $stmt->execute([$targetHost, $timestamp]);
-    }
-
-    return $result;
-}
-
 // --- CLI PROGRESS HELPER ---
 $CLI_MODE = false;
 
@@ -2912,12 +2365,7 @@ if (php_sapi_name() === 'cli' && !isset($_SERVER['REQUEST_METHOD'])) {
     register_shutdown_function(function() { echo "\033[?25h"; });
 
     echo "\n  🔍 Scanning \033[1m$domain\033[0m\n\n";
-    $data = performLookup($domain);
-    if ($pdo) {
-        // Insert with data=NULL - raw files stored on disk
-        $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')");
-        $stmt->execute([$domain, $data['timestamp']]);
-    }
+    $data = performLookup($domain, ['save_db' => true]);
     $registrar = 'N/A';
     foreach ($data['domain'] as $item) if (stripos($item['name'], 'Registrar') !== false) { $registrar = $item['value']; break; }
     $ips = array_keys($data['ip_lookup']);
@@ -3440,7 +2888,7 @@ if (isset($_GET['scan'])) {
     ob_implicit_flush(true);
 
     try {
-        $result = performLookupWithProgress($domain);
+        $result = performLookup($domain, ['sse' => true, 'save_db' => true]);
         sendComplete($result);
     } catch (Exception $e) {
         sendError($e->getMessage());
