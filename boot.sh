@@ -268,7 +268,7 @@ function getScanPath($domain, $timestamp) {
     return getenv('HOME') . "/.periscope/scans/$domain/$timestamp";
 }
 
-function saveRawFiles($path, $html, $headers, $whoisDomain, $whoisIps, $ssl, $dns, $rdap = null, $metadata_files = []) {
+function saveRawFiles($path, $html, $headers, $whoisDomain, $whoisIps, $ssl, $dns, $rdap = null, $metadata_files = [], $redirectChain = null, $ptrRecords = null) {
     // SAFETY: Ensure path is within expected directory
     $expectedBase = getenv('HOME') . "/.periscope/scans/";
     if (empty($path) || strpos(realpath(dirname($path)) ?: $path, $expectedBase) !== 0) {
@@ -287,7 +287,17 @@ function saveRawFiles($path, $html, $headers, $whoisDomain, $whoisIps, $ssl, $dn
     if (!empty($metadata_files['robots_txt'])) file_put_contents("$path/robots.txt", $metadata_files['robots_txt']);
     if (!empty($metadata_files['sitemap_xml'])) file_put_contents("$path/sitemap.xml", $metadata_files['sitemap_xml']);
     if (!empty($metadata_files['security_txt'])) file_put_contents("$path/security.txt", $metadata_files['security_txt']);
+    if (!empty($metadata_files['ads_txt'])) file_put_contents("$path/ads.txt", $metadata_files['ads_txt']);
+    if (!empty($metadata_files['app_ads_txt'])) file_put_contents("$path/app-ads.txt", $metadata_files['app_ads_txt']);
+    if (!empty($metadata_files['app_site_association'])) file_put_contents("$path/apple-app-site-association.json", $metadata_files['app_site_association']);
+    if (!empty($metadata_files['assetlinks'])) file_put_contents("$path/assetlinks.json", $metadata_files['assetlinks']);
+    if (!empty($metadata_files['manifest'])) file_put_contents("$path/manifest.json", $metadata_files['manifest']);
+    if (!empty($metadata_files['humans_txt'])) file_put_contents("$path/humans.txt", $metadata_files['humans_txt']);
+    if (!empty($metadata_files['browserconfig'])) file_put_contents("$path/browserconfig.xml", $metadata_files['browserconfig']);
+    if (!empty($metadata_files['keybase_txt'])) file_put_contents("$path/keybase.txt", $metadata_files['keybase_txt']);
     if (!empty($metadata_files['favicon'])) file_put_contents("$path/favicon.ico", $metadata_files['favicon']);
+    if ($redirectChain && count($redirectChain) > 0) file_put_contents("$path/redirects.json", json_encode($redirectChain));
+    if ($ptrRecords && count($ptrRecords) > 0) file_put_contents("$path/ptr_records.json", json_encode($ptrRecords));
 }
 
 // --- HASH-BASED FILE STORAGE ---
@@ -327,7 +337,13 @@ function getFileByHash($domain, $hash, $extension) {
 
 function downloadImage($url, $maxSize = 2000000) {
     $ctx = stream_context_create([
-        'http' => ['timeout' => 5, 'ignore_errors' => true, 'follow_location' => true],
+        'http' => [
+            'timeout' => 5,
+            'ignore_errors' => true,
+            'follow_location' => true,
+            'user_agent' => 'Periscope/' . PERISCOPE_VERSION . ' (Image Fetcher)',
+            'header' => "Accept: image/webp,image/png,image/jpeg,image/gif,image/*\r\n"
+        ],
         'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
     ]);
 
@@ -386,7 +402,17 @@ function loadRawFiles($path) {
         'robots_txt' => @file_get_contents("$path/robots.txt"),
         'sitemap_xml' => @file_get_contents("$path/sitemap.xml"),
         'security_txt' => @file_get_contents("$path/security.txt"),
-        'favicon' => file_exists("$path/favicon.ico")
+        'ads_txt' => @file_get_contents("$path/ads.txt"),
+        'app_ads_txt' => @file_get_contents("$path/app-ads.txt"),
+        'app_site_association' => @file_get_contents("$path/apple-app-site-association.json"),
+        'assetlinks' => @file_get_contents("$path/assetlinks.json"),
+        'manifest' => @file_get_contents("$path/manifest.json"),
+        'humans_txt' => @file_get_contents("$path/humans.txt"),
+        'browserconfig' => @file_get_contents("$path/browserconfig.xml"),
+        'keybase_txt' => @file_get_contents("$path/keybase.txt"),
+        'favicon' => file_exists("$path/favicon.ico"),
+        'redirect_chain' => @json_decode(@file_get_contents("$path/redirects.json"), true) ?: [],
+        'ptr_records' => @json_decode(@file_get_contents("$path/ptr_records.json"), true) ?: []
     ];
 }
 
@@ -408,6 +434,44 @@ function getRawRdap($domain) {
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
     return ($code === 200 && $json) ? $json : null;
+}
+
+function checkDomainExists($domain) {
+    $ch = curl_init("https://rdap.org/domain/" . $domain);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Periscope/' . PERISCOPE_VERSION);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+    $json = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($code === 404) {
+        // Fallback: check DNS NS records before declaring not found
+        $ns = @dns_get_record($domain, DNS_NS);
+        if ($ns && count($ns) > 0) {
+            return ['exists' => true, 'rdap' => null, 'source' => 'dns'];
+        }
+        return ['exists' => false, 'reason' => 'not_found'];
+    }
+    if ($code === 200 && $json) {
+        $data = json_decode($json, true);
+        if ($data && isset($data['errorCode'])) {
+            // RDAP returned an error, fallback to DNS check
+            $ns = @dns_get_record($domain, DNS_NS);
+            if ($ns && count($ns) > 0) {
+                return ['exists' => true, 'rdap' => null, 'source' => 'dns'];
+            }
+            return ['exists' => false, 'reason' => 'rdap_error'];
+        }
+        return ['exists' => true, 'rdap' => $json, 'source' => 'rdap'];
+    }
+    // RDAP request failed (timeout, etc.) - fallback to DNS check
+    $ns = @dns_get_record($domain, DNS_NS);
+    if ($ns && count($ns) > 0) {
+        return ['exists' => true, 'rdap' => null, 'source' => 'dns'];
+    }
+    return ['exists' => true, 'rdap' => null];
 }
 
 function parseRdap($json) {
@@ -494,20 +558,105 @@ function getWhois($domain, $rdapJson = null) {
         $out = parseRdap($rdapJson);
         if (!empty($out)) return $out;
     }
-    
+
     // Try fetching RDAP
     $rdapJson = getRawRdap($domain);
     if ($rdapJson) {
         $out = parseRdap($rdapJson);
         if (!empty($out)) return $out;
     }
-    
+
     // Fallback to raw whois
     $raw = shell_exec("whois " . escapeshellarg($domain));
     if ($raw) {
         return parseRawWhois($raw);
     }
     return [];
+}
+
+/**
+ * Run a dig query with retry on timeout and filter out error messages
+ */
+function digQuery($type, $host, $retries = 2) {
+    for ($i = 0; $i < $retries; $i++) {
+        $output = shell_exec("dig +short +time=3 +tries=1 -t " . escapeshellarg($type) . " " . escapeshellarg($host) . " 2>/dev/null");
+        if ($output === null) continue;
+
+        // Filter out dig error/warning messages (lines starting with ;;)
+        $lines = [];
+        foreach (explode("\n", $output) as $line) {
+            $line = trim($line);
+            if (empty($line)) continue;
+            if (strpos($line, ';;') === 0) continue; // Skip dig comments/errors
+            if (strpos($line, ';') === 0) continue;  // Skip any comment lines
+            $lines[] = $line;
+        }
+
+        if (!empty($lines)) {
+            return implode("\n", $lines);
+        }
+    }
+    return null;
+}
+
+function getHttpStatusText($code) {
+    $statusTexts = [
+        200 => 'OK', 201 => 'Created', 204 => 'No Content',
+        301 => 'Moved Permanently', 302 => 'Found', 303 => 'See Other',
+        307 => 'Temporary Redirect', 308 => 'Permanent Redirect',
+        400 => 'Bad Request', 401 => 'Unauthorized', 403 => 'Forbidden',
+        404 => 'Not Found', 500 => 'Internal Server Error', 502 => 'Bad Gateway',
+        503 => 'Service Unavailable', 504 => 'Gateway Timeout'
+    ];
+    return $statusTexts[$code] ?? 'Unknown';
+}
+
+function getRedirectChain($url, $maxRedirects = 10) {
+    $chain = [];
+    $currentUrl = $url;
+
+    for ($i = 0; $i < $maxRedirects; $i++) {
+        $ch = curl_init($currentUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HEADER, true);
+        curl_setopt($ch, CURLOPT_NOBODY, true);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false); // Don't auto-follow
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Periscope/' . PERISCOPE_VERSION);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        // Skip if we got no response
+        if ($httpCode === 0) break;
+
+        $chain[] = [
+            'url' => $currentUrl,
+            'status_code' => $httpCode,
+            'status_text' => getHttpStatusText($httpCode)
+        ];
+
+        // Check for redirect (3xx status codes)
+        if ($httpCode >= 300 && $httpCode < 400) {
+            // Extract Location header
+            if (preg_match('/^Location:\s*(.+)$/mi', $response, $m)) {
+                $location = trim($m[1]);
+                // Handle relative URLs
+                if (strpos($location, 'http') !== 0) {
+                    $parsed = parse_url($currentUrl);
+                    $base = $parsed['scheme'] . '://' . $parsed['host'];
+                    $location = $base . (strpos($location, '/') === 0 ? $location : '/' . $location);
+                }
+                $currentUrl = $location;
+                continue;
+            }
+        }
+        break; // No redirect, we're done
+    }
+
+    return $chain;
 }
 
 function getSSLInfo($domain, $rawOutput = null) {
@@ -1055,10 +1204,20 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
         'robots_txt' => null,
         'sitemap' => null,
         'security_txt' => null,
+        'ads_txt' => null,
+        'app_ads_txt' => null,
+        'app_site_association' => null,
+        'assetlinks' => null,
+        'manifest' => null,
+        'webfinger' => null,
+        'change_password' => null,
+        'humans_txt' => null,
+        'browserconfig' => null,
+        'keybase_txt' => null,
         'meta_tags' => [],
         'favicon' => null
     ];
-    $rawFiles = ['robots_txt' => null, 'sitemap_xml' => null, 'security_txt' => null, 'favicon' => null];
+    $rawFiles = ['robots_txt' => null, 'sitemap_xml' => null, 'security_txt' => null, 'ads_txt' => null, 'app_ads_txt' => null, 'app_site_association' => null, 'assetlinks' => null, 'manifest' => null, 'humans_txt' => null, 'browserconfig' => null, 'keybase_txt' => null, 'favicon' => null];
 
     $ctx = stream_context_create([
         'http' => ['timeout' => 2, 'ignore_errors' => true],
@@ -1092,19 +1251,45 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
         $result['robots_txt'] = ['present' => false];
     }
 
-    // Check sitemap.xml if not found in robots.txt
-    if (empty($result['robots_txt']['sitemaps'])) {
-        $sitemap = @file_get_contents("https://" . $domain . "/sitemap.xml", false, $ctx);
-        if (!$sitemap) $sitemap = @file_get_contents("http://" . $domain . "/sitemap.xml", false, $ctx);
-        if ($sitemap && (stripos($sitemap, '<urlset') !== false || stripos($sitemap, '<sitemapindex') !== false)) {
-            $rawFiles['sitemap_xml'] = $sitemap;
-            $urlCount = substr_count($sitemap, '<url>') + substr_count($sitemap, '<sitemap>');
-            $result['sitemap'] = ['present' => true, 'url' => '/sitemap.xml', 'url_count' => $urlCount];
-        } else {
-            $result['sitemap'] = ['present' => false];
-        }
-    } else {
+    // Check sitemap.xml
+    $sitemapUrl = "https://" . $domain . "/sitemap.xml";
+    $fromRobots = false;
+    
+    // If robots.txt declared a sitemap, prioritize the first one found
+    if (!empty($result['robots_txt']['sitemaps'])) {
+        $sitemapUrl = $result['robots_txt']['sitemaps'][0];
+        $fromRobots = true;
+    }
+
+    // Increase timeout slightly for sitemaps as they can be larger/slower
+    $sitemapCtx = stream_context_create([
+        'http' => ['timeout' => 5, 'ignore_errors' => true, 'follow_location' => 1],
+        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
+    ]);
+
+    $sitemapContent = @file_get_contents($sitemapUrl, false, $sitemapCtx);
+
+    // Fallback: If not found via robots.txt and HTTPS default failed, try HTTP default
+    if (!$sitemapContent && !$fromRobots) {
+         $sitemapContent = @file_get_contents("http://" . $domain . "/sitemap.xml", false, $sitemapCtx);
+    }
+
+    // Validate and Store
+    if ($sitemapContent && (stripos($sitemapContent, '<urlset') !== false || stripos($sitemapContent, '<sitemapindex') !== false)) {
+        $rawFiles['sitemap_xml'] = $sitemapContent;
+        $urlCount = substr_count($sitemapContent, '<url>') + substr_count($sitemapContent, '<sitemap>');
+        $result['sitemap'] = [
+            'present' => true, 
+            'url' => $sitemapUrl, 
+            'url_count' => $urlCount,
+            // Keep the urls array if it came from robots, but we now also have the raw content
+            'urls' => $fromRobots ? $result['robots_txt']['sitemaps'] : null
+        ];
+    } elseif ($fromRobots) {
+        // We failed to download it, but robots.txt says it exists
         $result['sitemap'] = ['present' => true, 'urls' => $result['robots_txt']['sitemaps']];
+    } else {
+        $result['sitemap'] = ['present' => false];
     }
 
     // Check security.txt
@@ -1123,18 +1308,265 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
         $result['security_txt'] = ['present' => false];
     }
 
+    // Check ads.txt (IAB Authorized Digital Sellers)
+    $adsTxt = @file_get_contents("https://" . $domain . "/ads.txt", false, $ctx);
+    if (!$adsTxt) $adsTxt = @file_get_contents("http://" . $domain . "/ads.txt", false, $ctx);
+    if ($adsTxt && preg_match('/^[a-z0-9.-]+,\s*[a-z0-9]+,/im', $adsTxt)) {
+        $rawFiles['ads_txt'] = $adsTxt;
+        $sellers = [];
+        $directCount = 0;
+        $resellerCount = 0;
+        foreach (explode("\n", $adsTxt) as $line) {
+            $line = trim($line);
+            if (empty($line) || $line[0] === '#') continue;
+            if (preg_match('/^([a-z0-9.-]+),\s*([a-z0-9]+),\s*(DIRECT|RESELLER)/i', $line, $m)) {
+                $domain_name = strtolower($m[1]);
+                if (!in_array($domain_name, $sellers)) $sellers[] = $domain_name;
+                if (strtoupper($m[3]) === 'DIRECT') $directCount++;
+                else $resellerCount++;
+            }
+        }
+        $result['ads_txt'] = [
+            'present' => true,
+            'seller_count' => count($sellers),
+            'direct_count' => $directCount,
+            'reseller_count' => $resellerCount,
+            'sellers' => array_slice($sellers, 0, 10)
+        ];
+    } else {
+        $result['ads_txt'] = ['present' => false];
+    }
+
+    // Check app-ads.txt (IAB Authorized Digital Sellers for Apps)
+    $appAdsTxt = @file_get_contents("https://" . $domain . "/app-ads.txt", false, $ctx);
+    if (!$appAdsTxt) $appAdsTxt = @file_get_contents("http://" . $domain . "/app-ads.txt", false, $ctx);
+    if ($appAdsTxt && preg_match('/^[a-z0-9.-]+,\s*[a-z0-9]+,/im', $appAdsTxt)) {
+        $rawFiles['app_ads_txt'] = $appAdsTxt;
+        $sellers = [];
+        $directCount = 0;
+        $resellerCount = 0;
+        foreach (explode("\n", $appAdsTxt) as $line) {
+            $line = trim($line);
+            if (empty($line) || $line[0] === '#') continue;
+            if (preg_match('/^([a-z0-9.-]+),\s*([a-z0-9]+),\s*(DIRECT|RESELLER)/i', $line, $m)) {
+                $domain_name = strtolower($m[1]);
+                if (!in_array($domain_name, $sellers)) $sellers[] = $domain_name;
+                if (strtoupper($m[3]) === 'DIRECT') $directCount++;
+                else $resellerCount++;
+            }
+        }
+        $result['app_ads_txt'] = [
+            'present' => true,
+            'seller_count' => count($sellers),
+            'direct_count' => $directCount,
+            'reseller_count' => $resellerCount,
+            'sellers' => array_slice($sellers, 0, 10)
+        ];
+    } else {
+        $result['app_ads_txt'] = ['present' => false];
+    }
+
+    // Check apple-app-site-association (iOS Universal Links)
+    $aasa = @file_get_contents("https://" . $domain . "/.well-known/apple-app-site-association", false, $ctx);
+    if (!$aasa) $aasa = @file_get_contents("https://" . $domain . "/apple-app-site-association", false, $ctx);
+    if ($aasa) {
+        $aasaData = @json_decode($aasa, true);
+        if ($aasaData && (isset($aasaData['applinks']) || isset($aasaData['webcredentials']) || isset($aasaData['appclips']))) {
+            $rawFiles['app_site_association'] = $aasa;
+            $appIds = [];
+            // Extract app IDs from applinks
+            if (isset($aasaData['applinks']['details'])) {
+                foreach ($aasaData['applinks']['details'] as $detail) {
+                    if (isset($detail['appID'])) $appIds[] = $detail['appID'];
+                    if (isset($detail['appIDs'])) $appIds = array_merge($appIds, $detail['appIDs']);
+                }
+            }
+            // Also check older format
+            if (isset($aasaData['applinks']['apps'])) {
+                $appIds = array_merge($appIds, $aasaData['applinks']['apps']);
+            }
+            // Check webcredentials
+            if (isset($aasaData['webcredentials']['apps'])) {
+                $appIds = array_merge($appIds, $aasaData['webcredentials']['apps']);
+            }
+            $appIds = array_unique(array_filter($appIds));
+            $result['app_site_association'] = [
+                'present' => true,
+                'has_applinks' => isset($aasaData['applinks']),
+                'has_webcredentials' => isset($aasaData['webcredentials']),
+                'has_appclips' => isset($aasaData['appclips']),
+                'app_ids' => array_slice(array_values($appIds), 0, 5)
+            ];
+        } else {
+            $result['app_site_association'] = ['present' => false];
+        }
+    } else {
+        $result['app_site_association'] = ['present' => false];
+    }
+
+    // Check assetlinks.json (Android App Links)
+    $assetlinks = @file_get_contents("https://" . $domain . "/.well-known/assetlinks.json", false, $ctx);
+    if ($assetlinks) {
+        $assetlinksData = @json_decode($assetlinks, true);
+        if ($assetlinksData && is_array($assetlinksData) && count($assetlinksData) > 0) {
+            $rawFiles['assetlinks'] = $assetlinks;
+            $packages = [];
+            foreach ($assetlinksData as $entry) {
+                if (isset($entry['target']['package_name'])) {
+                    $packages[] = $entry['target']['package_name'];
+                }
+            }
+            $packages = array_unique($packages);
+            $result['assetlinks'] = [
+                'present' => true,
+                'entry_count' => count($assetlinksData),
+                'packages' => array_slice(array_values($packages), 0, 5)
+            ];
+        } else {
+            $result['assetlinks'] = ['present' => false];
+        }
+    } else {
+        $result['assetlinks'] = ['present' => false];
+    }
+
+    // Check webfinger (Fediverse/Mastodon identity)
+    // We check if the endpoint exists by querying for a dummy resource
+    $webfingerCtx = stream_context_create([
+        'http' => ['timeout' => 2, 'ignore_errors' => true, 'follow_location' => 0],
+        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
+    ]);
+    
+    // Check for a non-existent user to see how the server handles it
+    // A valid WebFinger server should return 404 (User not found) but with JSON content
+    // Or 200 if we happen to hit a real user, also with JSON content
+    $webfinger = @file_get_contents("https://" . $domain . "/.well-known/webfinger?resource=acct:periscope_check@" . $domain, false, $webfingerCtx);
+    $webfingerHeaders = $http_response_header ?? [];
+    $webfingerStatus = 0;
+    $webfingerContentType = '';
+
+    if (!empty($webfingerHeaders[0]) && preg_match('/HTTP\/\d\.?\d?\s+(\d{3})/', $webfingerHeaders[0], $m)) {
+        $webfingerStatus = (int)$m[1];
+    }
+
+    // Extract Content-Type
+    foreach ($webfingerHeaders as $header) {
+        if (stripos($header, 'Content-Type:') === 0) {
+            $webfingerContentType = strtolower(trim(substr($header, 13)));
+            break;
+        }
+    }
+
+    // It is only WebFinger if:
+    // 1. Status is 200 (OK) OR 404 (User not found - valid endpoint) OR 400 (Bad Request - valid endpoint)
+    // 2. AND Content-Type contains 'json' (application/jrd+json or application/json)
+    // A standard WordPress 404 will be status 404 but Content-Type text/html -> This will now fail correctly.
+    if (($webfingerStatus === 200 || $webfingerStatus === 404 || $webfingerStatus === 400) && 
+        strpos($webfingerContentType, 'json') !== false) {
+        
+        $result['webfinger'] = [
+            'present' => true,
+            'status' => $webfingerStatus,
+            'content_type' => $webfingerContentType
+        ];
+    } else {
+        $result['webfinger'] = ['present' => false];
+    }
+
+    // Check change-password (security best practice)
+    $changePassCtx = stream_context_create([
+        'http' => ['timeout' => 2, 'ignore_errors' => true, 'follow_location' => 0],
+        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
+    ]);
+    @file_get_contents("https://" . $domain . "/.well-known/change-password", false, $changePassCtx);
+    $changePassHeaders = $http_response_header ?? [];
+    $changePassStatus = 0;
+    $changePassRedirect = null;
+    if (!empty($changePassHeaders[0]) && preg_match('/HTTP\/\d\.?\d?\s+(\d{3})/', $changePassHeaders[0], $m)) {
+        $changePassStatus = (int)$m[1];
+    }
+    // Check for redirect location
+    foreach ($changePassHeaders as $header) {
+        if (preg_match('/^Location:\s*(.+)/i', $header, $m)) {
+            $changePassRedirect = trim($m[1]);
+            break;
+        }
+    }
+    if ($changePassStatus >= 200 && $changePassStatus < 500) {
+        $result['change_password'] = [
+            'present' => true,
+            'status' => $changePassStatus,
+            'redirect' => $changePassRedirect
+        ];
+    } else {
+        $result['change_password'] = ['present' => false];
+    }
+
+    // Check humans.txt (team credits)
+    $humansTxt = @file_get_contents("https://" . $domain . "/humans.txt", false, $ctx);
+    if (!$humansTxt) $humansTxt = @file_get_contents("http://" . $domain . "/humans.txt", false, $ctx);
+    if ($humansTxt && strlen($humansTxt) > 10 && strlen($humansTxt) < 50000 && !preg_match('/<html|<!DOCTYPE/i', $humansTxt)) {
+        $rawFiles['humans_txt'] = $humansTxt;
+        $result['humans_txt'] = ['present' => true];
+    } else {
+        $result['humans_txt'] = ['present' => false];
+    }
+
+    // Check browserconfig.xml (Windows tiles)
+    $browserconfig = @file_get_contents("https://" . $domain . "/browserconfig.xml", false, $ctx);
+    if (!$browserconfig) $browserconfig = @file_get_contents("http://" . $domain . "/browserconfig.xml", false, $ctx);
+    if ($browserconfig && stripos($browserconfig, '<browserconfig') !== false) {
+        $rawFiles['browserconfig'] = $browserconfig;
+        $tileColor = null;
+        if (preg_match('/<TileColor>([^<]+)<\/TileColor>/i', $browserconfig, $m)) {
+            $tileColor = trim($m[1]);
+        }
+        $result['browserconfig'] = ['present' => true, 'tile_color' => $tileColor];
+    } else {
+        $result['browserconfig'] = ['present' => false];
+    }
+
+    // Check keybase.txt (identity verification)
+    $keybaseTxt = @file_get_contents("https://" . $domain . "/.well-known/keybase.txt", false, $ctx);
+    if (!$keybaseTxt) $keybaseTxt = @file_get_contents("https://" . $domain . "/keybase.txt", false, $ctx);
+    if ($keybaseTxt && preg_match('/==BEGIN.*KEYBASE|keybase\.io\/[a-z0-9_]+/i', $keybaseTxt)) {
+        $rawFiles['keybase_txt'] = $keybaseTxt;
+        $username = null;
+        if (preg_match('/keybase\.io\/([a-z0-9_]+)/i', $keybaseTxt, $m)) {
+            $username = $m[1];
+        }
+        $result['keybase_txt'] = ['present' => true, 'username' => $username];
+    } else {
+        $result['keybase_txt'] = ['present' => false];
+    }
+
     // Parse meta tags from HTML
     if ($html) {
         // Open Graph
         $og = [];
+        $ogImageSource = null;
         if (preg_match('/<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $og['title'] = $m[1];
         if (preg_match('/<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $og['description'] = $m[1];
-        if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $og['image'] = $m[1];
+        if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) {
+            $og['image'] = $m[1];
+            $ogImageSource = 'og:image';
+        }
         if (preg_match('/<meta[^>]+property=["\']og:type["\'][^>]+content=["\']([^"\']+)/i', $html, $m)) $og['type'] = $m[1];
 
         // Download and store OG image
         if (isset($og['image']) && $og['image']) {
-            $ogImageData = downloadImage($og['image']);
+            if ($ogImageSource && $ogImageSource !== 'og:image') {
+                $og['image_source'] = $ogImageSource;
+            }
+            $ogImageUrl = $og['image'];
+            // Handle relative and protocol-relative URLs
+            if (strpos($ogImageUrl, '//') === 0) {
+                $ogImageUrl = 'https:' . $ogImageUrl;
+            } elseif (strpos($ogImageUrl, '/') === 0) {
+                $ogImageUrl = 'https://' . $domain . $ogImageUrl;
+            } elseif (strpos($ogImageUrl, 'http') !== 0) {
+                $ogImageUrl = 'https://' . $domain . '/' . $ogImageUrl;
+            }
+            $ogImageData = downloadImage($ogImageUrl);
             if ($ogImageData) {
                 $stored = storeFileByHash($domain, $ogImageData['content'], $ogImageData['extension']);
                 $og['image_hash'] = $stored['hash'];
@@ -1154,7 +1586,16 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
 
         // Download and store Twitter image if different from OG
         if (isset($twitter['image']) && $twitter['image'] && $twitter['image'] !== ($og['image'] ?? '')) {
-            $twitterImageData = downloadImage($twitter['image']);
+            $twitterImageUrl = $twitter['image'];
+            // Handle relative and protocol-relative URLs
+            if (strpos($twitterImageUrl, '//') === 0) {
+                $twitterImageUrl = 'https:' . $twitterImageUrl;
+            } elseif (strpos($twitterImageUrl, '/') === 0) {
+                $twitterImageUrl = 'https://' . $domain . $twitterImageUrl;
+            } elseif (strpos($twitterImageUrl, 'http') !== 0) {
+                $twitterImageUrl = 'https://' . $domain . '/' . $twitterImageUrl;
+            }
+            $twitterImageData = downloadImage($twitterImageUrl);
             if ($twitterImageData) {
                 $stored = storeFileByHash($domain, $twitterImageData['content'], $twitterImageData['extension']);
                 $twitter['image_hash'] = $stored['hash'];
@@ -1178,6 +1619,48 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
         if (preg_match('/<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)/i', $html, $m)) {
             $result['meta_tags']['canonical'] = $m[1];
         }
+    }
+
+    // Check manifest.json / site.webmanifest (PWA)
+    $manifestUrl = null;
+    $manifest = null;
+    // First check HTML for link rel="manifest"
+    if ($html && preg_match('/<link[^>]+rel=["\']manifest["\'][^>]+href=["\']([^"\']+)/i', $html, $m)) {
+        $manifestUrl = $m[1];
+        if (strpos($manifestUrl, '//') === false) {
+            $manifestUrl = "https://" . $domain . (strpos($manifestUrl, '/') === 0 ? '' : '/') . $manifestUrl;
+        }
+        $manifest = @file_get_contents($manifestUrl, false, $ctx);
+    }
+    // Fallback to common locations
+    if (!$manifest) {
+        $manifest = @file_get_contents("https://" . $domain . "/manifest.json", false, $ctx);
+        if ($manifest) $manifestUrl = '/manifest.json';
+    }
+    if (!$manifest) {
+        $manifest = @file_get_contents("https://" . $domain . "/site.webmanifest", false, $ctx);
+        if ($manifest) $manifestUrl = '/site.webmanifest';
+    }
+    if ($manifest) {
+        $manifestData = @json_decode($manifest, true);
+        if ($manifestData && (isset($manifestData['name']) || isset($manifestData['short_name']))) {
+            $rawFiles['manifest'] = $manifest;
+            $result['manifest'] = [
+                'present' => true,
+                'url' => $manifestUrl,
+                'name' => $manifestData['name'] ?? $manifestData['short_name'] ?? null,
+                'short_name' => $manifestData['short_name'] ?? null,
+                'display' => $manifestData['display'] ?? null,
+                'theme_color' => $manifestData['theme_color'] ?? null,
+                'background_color' => $manifestData['background_color'] ?? null,
+                'start_url' => $manifestData['start_url'] ?? null,
+                'icon_count' => isset($manifestData['icons']) ? count($manifestData['icons']) : 0
+            ];
+        } else {
+            $result['manifest'] = ['present' => false];
+        }
+    } else {
+        $result['manifest'] = ['present' => false];
     }
 
     // Favicon detection - prefer high-quality icons from HTML, fallback to /favicon.ico
@@ -1283,6 +1766,68 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
     return $result;
 }
 
+/**
+ * Detect if a website is blocking search engine indexing
+ * Checks: robots.txt (Disallow: /), meta robots noindex, X-Robots-Tag header
+ */
+function detectSearchEngineBlocking($html, $headers, $robotsTxt = null) {
+    $result = [
+        'blocked' => false,
+        'reasons' => []
+    ];
+
+    // Check X-Robots-Tag header
+    foreach ($headers as $name => $value) {
+        if (strtolower($name) === 'x-robots-tag') {
+            if (preg_match('/noindex/i', $value)) {
+                $result['blocked'] = true;
+                $result['reasons'][] = ['type' => 'header', 'detail' => 'X-Robots-Tag: noindex'];
+            }
+        }
+    }
+
+    // Check meta robots tag in HTML
+    if ($html) {
+        // Match both name="robots" and name="googlebot" etc.
+        if (preg_match('/<meta[^>]+name=["\']robots["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $html, $m) ||
+            preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']robots["\'][^>]*>/i', $html, $m)) {
+            $content = strtolower($m[1]);
+            if (strpos($content, 'noindex') !== false) {
+                $result['blocked'] = true;
+                $result['reasons'][] = ['type' => 'meta', 'detail' => 'meta robots: noindex'];
+            }
+        }
+    }
+
+    // Check robots.txt for blanket disallow
+    if ($robotsTxt) {
+        $lines = explode("\n", $robotsTxt);
+        $currentAgent = '';
+        $disallowAll = false;
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (empty($line) || $line[0] === '#') continue;
+
+            if (preg_match('/^User-agent:\s*(.+)/i', $line, $m)) {
+                $currentAgent = strtolower(trim($m[1]));
+            } elseif (preg_match('/^Disallow:\s*\/\s*$/i', $line)) {
+                // Disallow: / (root = everything)
+                if ($currentAgent === '*') {
+                    $disallowAll = true;
+                }
+            }
+        }
+
+        if ($disallowAll) {
+            $result['blocked'] = true;
+            $result['reasons'][] = ['type' => 'robots_txt', 'detail' => 'robots.txt: Disallow: /'];
+        }
+    }
+
+    return $result;
+}
+
 function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
     $html = $raw['html'] ?: '';
     $headers = $raw['headers'] ?: [];
@@ -1307,6 +1852,9 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
             $ip_lookup[$ip] = $res ?: 'N/A';
         }
     }
+    
+    // Load PTR records
+    $ptr_records = $raw['ptr_records'] ?? [];
 
     // Parse domain WHOIS: prefer RDAP, fallback to raw whois
     $domainData = [];
@@ -1317,18 +1865,24 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
         $domainData = parseRawWhois($whoisDomain);
     }
 
+    $metadataRawFiles = [];
+    $metadata = detectMetadata($domain, $html, $metadataRawFiles);
+    $robotsTxtContent = $raw['robots_txt'] ?? ($metadataRawFiles['robots_txt'] ?? null);
+
     $data = [
         'domain' => $domainData,
         'dns_records' => $dnsRecords,
         'zone' => $zoneFile,
         'ip_lookup' => $ip_lookup,
+        'ptr_records' => $ptr_records,
         'http_headers' => $headers,
         'ssl' => getSSLInfo($domain, $rawSsl),
         'cms' => detectCMS($domain, $html, $headers),
         'infrastructure' => detectInfrastructure($headers),
         'security' => detectSecurityHeaders($headers),
         'technology' => detectTechnology($html, $headers),
-        'metadata' => detectMetadata($domain, $html),
+        'metadata' => $metadata,
+        'indexability' => detectSearchEngineBlocking($html, $headers, $robotsTxtContent),
         'errors' => [],
         'raw_available' => true,
         'plugin_version' => PERISCOPE_VERSION
@@ -1356,17 +1910,90 @@ function performLookup($domain) {
         return ['error' => 'Invalid or empty domain', 'domain' => [], 'dns_records' => [], 'zone' => '', 'errors' => ['Invalid domain provided']];
     }
 
-    // Check for wildcard A record on root domain
-    $wildcardA = shell_exec("dig +short -t A " . escapeshellarg("*.$rootDomain"));
-    $hasWildcardA = !empty(trim($wildcardA));
+    cliProgress('Checking domain registration...');
     
-    // If wildcard exists, record it
+    // Check if domain exists via RDAP
+    $domainCheck = checkDomainExists($rootDomain);
+    
+    if (!$domainCheck['exists']) {
+        cliProgressDone('Domain not registered');
+        $timestamp = time();
+        $result = [
+            'target_host' => $targetHost,
+            'root_domain' => $rootDomain,
+            'is_subdomain' => $isSubdomain,
+            'domain_exists' => false,
+            'domain' => [],
+            'dns_records' => [],
+            'zone' => '',
+            'ip_lookup' => [],
+            'http_headers' => [],
+            'ssl' => [],
+            'cms' => [],
+            'infrastructure' => [],
+            'security' => [],
+            'technology' => [],
+            'metadata' => [],
+            'redirect_chain' => [],
+            'indexability' => [],
+            'errors' => [],
+            'timestamp' => $timestamp,
+            'raw_available' => false,
+            'plugin_version' => PERISCOPE_VERSION
+        ];
+        
+        // Save response cache so it can be loaded from history
+        $scanPath = getScanPath($targetHost, $timestamp);
+        if (!is_dir($scanPath)) mkdir($scanPath, 0755, true);
+        saveResponseCache($scanPath, $result);
+        
+        return $result;
+    }
+    
+    // Store RDAP result for later use
+    $cachedRdap = $domainCheck['rdap'] ?? null;
+
+    cliProgress('Scanning DNS records...');
+
+    // Check for wildcard A record on root domain
+    $wildcardA = digQuery('A', "*.$rootDomain");
+    $hasWildcardA = !empty(trim($wildcardA));
+
+    // If wildcard A exists, record it
     if ($hasWildcardA) {
         foreach (explode("\n", trim($wildcardA)) as $val) {
             $val = trim($val); if (empty($val)) continue;
+            // Skip if it looks like a hostname (CNAME target returned by dig)
+            if (preg_match('/[a-zA-Z]/', $val) && substr($val, -1) === '.') continue;
             $key = "A|*|$val"; if (isset($check_map[$key])) continue;
             $check_map[$key] = true;
             $raw_records[] = ['type' => 'A', 'name' => '*', 'value' => $val];
+        }
+    }
+
+    // Check for wildcard TXT record on root domain
+    $wildcardTXT = digQuery('TXT', "*.$rootDomain");
+    $wildcardTXTValue = null;
+    if (!empty(trim($wildcardTXT))) {
+        $wildcardTXTValue = trim($wildcardTXT);
+        // Record the wildcard TXT
+        $key = "TXT|*|$wildcardTXTValue";
+        if (!isset($check_map[$key])) {
+            $check_map[$key] = true;
+            $raw_records[] = ['type' => 'TXT', 'name' => '*', 'value' => $wildcardTXTValue];
+        }
+    }
+
+    // Check for wildcard CNAME record on root domain
+    $wildcardCNAME = digQuery('CNAME', "*.$rootDomain");
+    $wildcardCNAMEValue = null;
+    if (!empty(trim($wildcardCNAME))) {
+        $wildcardCNAMEValue = trim(explode("\n", trim($wildcardCNAME))[0]);
+        // Record the wildcard CNAME
+        $key = "CNAME|*|$wildcardCNAMEValue";
+        if (!isset($check_map[$key])) {
+            $check_map[$key] = true;
+            $raw_records[] = ['type' => 'CNAME', 'name' => '*', 'value' => $wildcardCNAMEValue];
         }
     }
 
@@ -1464,7 +2091,7 @@ function performLookup($domain) {
     if ($isSubdomain) {
         $subdomainPart = str_replace('.' . $rootDomain, '', $targetHost);
         foreach (['A', 'AAAA', 'CNAME'] as $type) {
-            $output = shell_exec("dig +short -t $type " . escapeshellarg($targetHost));
+            $output = digQuery($type, $targetHost);
             if (!$output) continue;
             foreach (explode("\n", trim($output)) as $val) {
                 $val = trim($val); if (empty($val)) continue;
@@ -1485,10 +2112,46 @@ function performLookup($domain) {
 
         // DNS queries are relative to root domain
         $host = $name ? "$name.$rootDomain" : $rootDomain;
-        $output = shell_exec("dig +short -t $type " . escapeshellarg($host));
+
+        // For subdomain A/AAAA/TXT checks: first check if CNAME exists, record it and skip the query
+        // (dig follows CNAMEs and returns records from the target, which we don't want)
+        if (($type === 'A' || $type === 'AAAA' || $type === 'TXT') && !empty($name) && $type !== 'CNAME') {
+            $cnameOutput = digQuery('CNAME', $host);
+            if ($cnameOutput && !empty(trim($cnameOutput))) {
+                $cnameVal = trim(explode("\n", trim($cnameOutput))[0]);
+                // Skip if this matches the wildcard CNAME (duplicate from wildcard)
+                if ($wildcardCNAMEValue !== null && $cnameVal === $wildcardCNAMEValue) {
+                    continue;
+                }
+                $key = "CNAME|$name|$cnameVal";
+                if (!isset($check_map[$key])) {
+                    $check_map[$key] = true;
+                    $raw_records[] = ['type' => 'CNAME', 'name' => $name, 'value' => $cnameVal];
+                }
+                continue; // Skip the A/AAAA/TXT query since we found a CNAME
+            }
+        }
+
+        $output = digQuery($type, $host);
         if (!$output) continue;
         foreach (explode("\n", trim($output)) as $val) {
             $val = trim($val); if (empty($val)) continue;
+
+            // For A/AAAA records: skip values that look like hostnames (CNAME targets returned by dig)
+            if (($type === 'A' || $type === 'AAAA') && preg_match('/[a-zA-Z]/', $val)) {
+                continue;
+            }
+
+            // Skip TXT records that match the wildcard TXT value (duplicates from wildcard)
+            if ($type === 'TXT' && $wildcardTXTValue !== null && !empty($name) && $val === $wildcardTXTValue) {
+                continue;
+            }
+
+            // Skip CNAME records that match the wildcard CNAME value (duplicates from wildcard)
+            if ($type === 'CNAME' && $wildcardCNAMEValue !== null && !empty($name) && $name !== '*' && $val === $wildcardCNAMEValue) {
+                continue;
+            }
+
             $key = "$type|$name|$val"; if (isset($check_map[$key])) continue;
             $check_map[$key] = true;
             $raw_records[] = ['type' => $type, 'name' => $name ?: '@', 'value' => $val];
@@ -1498,7 +2161,7 @@ function performLookup($domain) {
     // CNAME Exclusivity Logic
     $cname_hosts = [];
     foreach ($raw_records as $r) if ($r['type'] === 'CNAME') $cname_hosts[$r['name']] = true;
-    
+
     $dns_records = [];
     $zone = new Zone($rootDomain . ".");
     $zone->setDefaultTtl(3600);
@@ -1525,8 +2188,11 @@ function performLookup($domain) {
     $builder->addRdataFormatter('TXT', 'specialTxtFormatter');
     $zoneFile = $builder->build($zone);
 
-    // Capture raw IP WHOIS data - resolve IPs for the target host
-    $ips = gethostbynamel($targetHost); $ip_lookup = []; $rawWhoisIps = [];
+    cliProgressDone('DNS records scanned (' . count($dns_records) . ' found)');
+    cliProgress('Resolving IP addresses...');
+
+    // Capture raw IP WHOIS data and PTR records - resolve IPs for the target host
+    $ips = gethostbynamel($targetHost); $ip_lookup = []; $rawWhoisIps = []; $ptrRecords = [];
     if ($ips) foreach ($ips as $ip) {
         $rawIpWhois = shell_exec("whois " . escapeshellarg($ip));
         $rawWhoisIps[$ip] = $rawIpWhois;
@@ -1541,6 +2207,28 @@ function performLookup($domain) {
             }
         }
         $ip_lookup[$ip] = $res ?: 'N/A';
+        
+        // PTR (reverse DNS) lookup
+        $ptr = trim(shell_exec("dig -x " . escapeshellarg($ip) . " +short 2>/dev/null") ?: '');
+        $ptr = rtrim($ptr, '.'); // Remove trailing dot
+        if ($ptr && !empty($ptr)) {
+            // Verify forward match (PTR hostname should resolve back to this IP)
+            $forwardIps = @gethostbynamel($ptr);
+            $forwardMatch = $forwardIps && in_array($ip, $forwardIps);
+            $ptrRecords[$ip] = [
+                'ptr' => $ptr,
+                'forward_match' => $forwardMatch
+            ];
+        }
+    }
+
+    cliProgressDone('IP addresses resolved (' . count($ip_lookup) . ' found)');
+    cliProgress('Fetching HTTP headers & SSL...');
+
+    // Capture redirect chain - try HTTPS first, fallback to HTTP
+    $redirectChain = getRedirectChain("https://" . $targetHost);
+    if (empty($redirectChain) || (count($redirectChain) === 1 && $redirectChain[0]['status_code'] === 0)) {
+        $redirectChain = getRedirectChain("http://" . $targetHost);
     }
 
     // Capture raw HTTP headers - from target host
@@ -1563,14 +2251,20 @@ function performLookup($domain) {
     // Capture raw SSL output - from target host
     $rawSsl = getRawSSL($targetHost);
 
+    cliProgressDone('HTTP headers & SSL fetched');
+    cliProgress('Looking up domain registration...');
+
     // Capture raw WHOIS for domain - always from root domain
     $rawWhoisDomain = getRawWhoisDomain($rootDomain);
 
-    // Capture RDAP JSON (for rich domain info) - always from root domain
-    $rawRdap = getRawRdap($rootDomain);
+    // Use cached RDAP from domain existence check if available
+    $rawRdap = $cachedRdap ?? getRawRdap($rootDomain);
 
     // Get timestamp for this scan
     $timestamp = time();
+
+    cliProgressDone('Domain registration retrieved');
+    cliProgress('Analyzing results...');
 
     // Run detection functions - tech detection uses target host
     $ssl = getSSLInfo($targetHost, $rawSsl);
@@ -1580,15 +2274,15 @@ function performLookup($domain) {
     $technology = detectTechnology($html, $headers);
     $metadataRawFiles = [];
     $metadata = detectMetadata($targetHost, $html, $metadataRawFiles);
+    $indexability = detectSearchEngineBlocking($html, $headers, $metadataRawFiles['robots_txt'] ?? null);
 
     // Save raw files to disk - under target host
     $scanPath = getScanPath($targetHost, $timestamp);
     saveRawFiles($scanPath, $html, $headers, $rawWhoisDomain, $rawWhoisIps, $rawSsl, [
         'records' => $dns_records,
         'zone' => $zoneFile
-    ], $rawRdap, $metadataRawFiles);
+    ], $rawRdap, $metadataRawFiles, $redirectChain, $ptrRecords);
 
-    // Parse domain WHOIS: prefer RDAP, fallback to raw whois
     $domainData = $rawRdap ? parseRdap($rawRdap) : [];
     if (empty($domainData)) $domainData = parseRawWhois($rawWhoisDomain);
 
@@ -1596,11 +2290,35 @@ function performLookup($domain) {
     if ($metadata['robots_txt'] && $metadata['robots_txt']['present']) {
         $metadata['robots_txt']['raw_stored'] = !empty($metadataRawFiles['robots_txt']);
     }
-    if ($metadata['sitemap'] && $metadata['sitemap']['present'] && !isset($metadata['sitemap']['urls'])) {
+    if ($metadata['sitemap'] && $metadata['sitemap']['present']) {
         $metadata['sitemap']['raw_stored'] = !empty($metadataRawFiles['sitemap_xml']);
     }
     if ($metadata['security_txt'] && $metadata['security_txt']['present']) {
         $metadata['security_txt']['raw_stored'] = !empty($metadataRawFiles['security_txt']);
+    }
+    if ($metadata['ads_txt'] && $metadata['ads_txt']['present']) {
+        $metadata['ads_txt']['raw_stored'] = !empty($metadataRawFiles['ads_txt']);
+    }
+    if ($metadata['app_ads_txt'] && $metadata['app_ads_txt']['present']) {
+        $metadata['app_ads_txt']['raw_stored'] = !empty($metadataRawFiles['app_ads_txt']);
+    }
+    if ($metadata['app_site_association'] && $metadata['app_site_association']['present']) {
+        $metadata['app_site_association']['raw_stored'] = !empty($metadataRawFiles['app_site_association']);
+    }
+    if ($metadata['assetlinks'] && $metadata['assetlinks']['present']) {
+        $metadata['assetlinks']['raw_stored'] = !empty($metadataRawFiles['assetlinks']);
+    }
+    if ($metadata['manifest'] && $metadata['manifest']['present']) {
+        $metadata['manifest']['raw_stored'] = !empty($metadataRawFiles['manifest']);
+    }
+    if ($metadata['humans_txt'] && $metadata['humans_txt']['present']) {
+        $metadata['humans_txt']['raw_stored'] = !empty($metadataRawFiles['humans_txt']);
+    }
+    if ($metadata['browserconfig'] && $metadata['browserconfig']['present']) {
+        $metadata['browserconfig']['raw_stored'] = !empty($metadataRawFiles['browserconfig']);
+    }
+    if ($metadata['keybase_txt'] && $metadata['keybase_txt']['present']) {
+        $metadata['keybase_txt']['raw_stored'] = !empty($metadataRawFiles['keybase_txt']);
     }
     if ($metadata['favicon'] && $metadata['favicon']['present'] && isset($metadata['favicon']['hash'])) {
         $metadata['favicon']['raw_stored'] = !empty($metadataRawFiles['favicon']);
@@ -1611,14 +2329,17 @@ function performLookup($domain) {
         'root_domain' => $rootDomain,
         'is_subdomain' => $isSubdomain,
         'domain' => $domainData, 'dns_records' => $dns_records, 'zone' => $zoneFile,
-        'ip_lookup' => $ip_lookup, 'http_headers' => $headers, 'ssl' => $ssl, 'cms' => $cms,
+        'ip_lookup' => $ip_lookup, 'ptr_records' => $ptrRecords, 'http_headers' => $headers, 'ssl' => $ssl, 'cms' => $cms,
         'infrastructure' => $infra, 'security' => $security, 'technology' => $technology,
-        'metadata' => $metadata, 'errors' => [], 'timestamp' => $timestamp, 'raw_available' => true,
+        'metadata' => $metadata, 'redirect_chain' => $redirectChain, 'indexability' => $indexability,
+        'errors' => [], 'timestamp' => $timestamp, 'raw_available' => true,
         'plugin_version' => PERISCOPE_VERSION
     ];
 
     // Save response cache for fast future loads
     saveResponseCache($scanPath, $result);
+
+    cliProgressDone('Scan complete');
 
     return $result;
 }
@@ -1672,20 +2393,95 @@ function performLookupWithProgress($domain) {
         return ['error' => 'Invalid or empty domain'];
     }
 
+    // === PHASE 0: Check if domain exists via RDAP ===
+    sendProgress(1, $total_steps, 'Checking domain registration...');
+    $domainCheck = checkDomainExists($rootDomain);
+    
+    if (!$domainCheck['exists']) {
+        $timestamp = time();
+        $result = [
+            'target_host' => $targetHost,
+            'root_domain' => $rootDomain,
+            'is_subdomain' => $isSubdomain,
+            'domain_exists' => false,
+            'domain' => [],
+            'dns_records' => [],
+            'zone' => '',
+            'ip_lookup' => [],
+            'http_headers' => [],
+            'ssl' => [],
+            'cms' => [],
+            'infrastructure' => [],
+            'security' => [],
+            'technology' => [],
+            'metadata' => [],
+            'redirect_chain' => [],
+            'indexability' => [],
+            'errors' => [],
+            'timestamp' => $timestamp,
+            'raw_available' => false,
+            'plugin_version' => PERISCOPE_VERSION
+        ];
+        
+        // Save response cache so it can be loaded from history
+        $scanPath = getScanPath($targetHost, $timestamp);
+        if (!is_dir($scanPath)) mkdir($scanPath, 0755, true);
+        saveResponseCache($scanPath, $result);
+        
+        // Save to history database
+        if ($pdo) {
+            $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')");
+            $stmt->execute([$targetHost, $timestamp]);
+        }
+        
+        return $result;
+    }
+    
+    // Store RDAP result for later use (avoid duplicate request)
+    $cachedRdap = $domainCheck['rdap'] ?? null;
+
     // === PHASE 1: Core DNS & Subdomains ===
     sendProgress(1, $total_steps, 'Scanning core DNS records...');
 
     // Check for wildcard A record on root domain
-    $wildcardA = shell_exec("dig +short -t A " . escapeshellarg("*.$rootDomain"));
+    $wildcardA = digQuery('A', "*.$rootDomain");
     $hasWildcardA = !empty(trim($wildcardA));
-    
-    // If wildcard exists, record it
+
+    // If wildcard A exists, record it
     if ($hasWildcardA) {
         foreach (explode("\n", trim($wildcardA)) as $val) {
             $val = trim($val); if (empty($val)) continue;
+            // Skip if it looks like a hostname (CNAME target returned by dig)
+            if (preg_match('/[a-zA-Z]/', $val) && substr($val, -1) === '.') continue;
             $key = "A|*|$val"; if (isset($check_map[$key])) continue;
             $check_map[$key] = true;
             $raw_records[] = ['type' => 'A', 'name' => '*', 'value' => $val];
+        }
+    }
+
+    // Check for wildcard TXT record on root domain
+    $wildcardTXT = digQuery('TXT', "*.$rootDomain");
+    $wildcardTXTValue = null;
+    if (!empty(trim($wildcardTXT))) {
+        $wildcardTXTValue = trim($wildcardTXT);
+        // Record the wildcard TXT
+        $key = "TXT|*|$wildcardTXTValue";
+        if (!isset($check_map[$key])) {
+            $check_map[$key] = true;
+            $raw_records[] = ['type' => 'TXT', 'name' => '*', 'value' => $wildcardTXTValue];
+        }
+    }
+
+    // Check for wildcard CNAME record on root domain
+    $wildcardCNAME = digQuery('CNAME', "*.$rootDomain");
+    $wildcardCNAMEValue = null;
+    if (!empty(trim($wildcardCNAME))) {
+        $wildcardCNAMEValue = trim(explode("\n", trim($wildcardCNAME))[0]);
+        // Record the wildcard CNAME
+        $key = "CNAME|*|$wildcardCNAMEValue";
+        if (!isset($check_map[$key])) {
+            $check_map[$key] = true;
+            $raw_records[] = ['type' => 'CNAME', 'name' => '*', 'value' => $wildcardCNAMEValue];
         }
     }
 
@@ -1736,7 +2532,7 @@ function performLookupWithProgress($domain) {
     if ($isSubdomain) {
         $subdomainPart = str_replace('.' . $rootDomain, '', $targetHost);
         foreach (['A', 'AAAA', 'CNAME'] as $type) {
-            $output = shell_exec("dig +short -t $type " . escapeshellarg($targetHost));
+            $output = digQuery($type, $targetHost);
             if (!$output) continue;
             foreach (explode("\n", trim($output)) as $val) {
                 $val = trim($val); if (empty($val)) continue;
@@ -1757,10 +2553,41 @@ function performLookupWithProgress($domain) {
 
         // DNS queries are relative to root domain
         $host = $name ? "$name.$rootDomain" : $rootDomain;
-        $output = shell_exec("dig +short -t $type " . escapeshellarg($host));
+
+        // For subdomain A/AAAA/TXT checks: first check if CNAME exists, record it and skip the query
+        // (dig follows CNAMEs and returns records from the target, which we don't want)
+        if (($type === 'A' || $type === 'AAAA' || $type === 'TXT') && !empty($name) && $type !== 'CNAME') {
+            $cnameOutput = digQuery('CNAME', $host);
+            if ($cnameOutput && !empty(trim($cnameOutput))) {
+                $cnameVal = trim(explode("\n", trim($cnameOutput))[0]);
+                // Skip if this matches the wildcard CNAME (duplicate from wildcard)
+                if ($wildcardCNAMEValue !== null && $cnameVal === $wildcardCNAMEValue) {
+                    continue;
+                }
+                $key = "CNAME|$name|$cnameVal";
+                if (!isset($check_map[$key])) {
+                    $check_map[$key] = true;
+                    $raw_records[] = ['type' => 'CNAME', 'name' => $name, 'value' => $cnameVal];
+                }
+                continue; // Skip the A/AAAA/TXT query since we found a CNAME
+            }
+        }
+
+        $output = digQuery($type, $host);
         if (!$output) continue;
         foreach (explode("\n", trim($output)) as $val) {
             $val = trim($val); if (empty($val)) continue;
+
+            // For A/AAAA records: skip values that look like hostnames (CNAME targets returned by dig)
+            if (($type === 'A' || $type === 'AAAA') && preg_match('/[a-zA-Z]/', $val)) {
+                continue;
+            }
+
+            // Skip TXT records that match the wildcard TXT value (duplicates from wildcard)
+            if ($type === 'TXT' && $wildcardTXTValue !== null && !empty($name) && $val === $wildcardTXTValue) {
+                continue;
+            }
+
             $key = "$type|$name|$val"; if (isset($check_map[$key])) continue;
             $check_map[$key] = true;
             $raw_records[] = ['type' => $type, 'name' => $name ?: '@', 'value' => $val];
@@ -1823,10 +2650,46 @@ function performLookupWithProgress($domain) {
         $type = $check['type']; $name = $check['name'];
         // Email/DKIM records are always on the root domain
         $host = $name ? "$name.$rootDomain" : $rootDomain;
-        $output = shell_exec("dig +short -t $type " . escapeshellarg($host));
+
+        // For subdomain A/AAAA/TXT checks: first check if CNAME exists, record it and skip the query
+        // (dig follows CNAMEs and returns records from the target, which we don't want)
+        if (($type === 'A' || $type === 'AAAA' || $type === 'TXT') && !empty($name) && $type !== 'CNAME') {
+            $cnameOutput = digQuery('CNAME', $host);
+            if ($cnameOutput && !empty(trim($cnameOutput))) {
+                $cnameVal = trim(explode("\n", trim($cnameOutput))[0]);
+                // Skip if this matches the wildcard CNAME (duplicate from wildcard)
+                if ($wildcardCNAMEValue !== null && $cnameVal === $wildcardCNAMEValue) {
+                    continue;
+                }
+                $key = "CNAME|$name|$cnameVal";
+                if (!isset($check_map[$key])) {
+                    $check_map[$key] = true;
+                    $raw_records[] = ['type' => 'CNAME', 'name' => $name, 'value' => $cnameVal];
+                }
+                continue; // Skip the A/AAAA/TXT query since we found a CNAME
+            }
+        }
+
+        $output = digQuery($type, $host);
         if (!$output) continue;
         foreach (explode("\n", trim($output)) as $val) {
             $val = trim($val); if (empty($val)) continue;
+
+            // For A/AAAA records: skip values that look like hostnames (CNAME targets returned by dig)
+            if (($type === 'A' || $type === 'AAAA') && preg_match('/[a-zA-Z]/', $val)) {
+                continue;
+            }
+
+            // Skip TXT records that match the wildcard TXT value (duplicates from wildcard)
+            if ($type === 'TXT' && $wildcardTXTValue !== null && !empty($name) && $val === $wildcardTXTValue) {
+                continue;
+            }
+
+            // Skip CNAME records that match the wildcard CNAME value (duplicates from wildcard)
+            if ($type === 'CNAME' && $wildcardCNAMEValue !== null && !empty($name) && $name !== '*' && $val === $wildcardCNAMEValue) {
+                continue;
+            }
+
             $key = "$type|$name|$val"; if (isset($check_map[$key])) continue;
             $check_map[$key] = true;
             $raw_records[] = ['type' => $type, 'name' => $name ?: '@', 'value' => $val];
@@ -1867,7 +2730,7 @@ function performLookupWithProgress($domain) {
     sendProgress(3, $total_steps, 'Resolving IP addresses...');
 
     // Resolve IPs for the target host (not root domain)
-    $ips = gethostbynamel($targetHost); $ip_lookup = []; $rawWhoisIps = [];
+    $ips = gethostbynamel($targetHost); $ip_lookup = []; $rawWhoisIps = []; $ptrRecords = [];
     if ($ips) foreach ($ips as $ip) {
         $rawIpWhois = shell_exec("whois " . escapeshellarg($ip));
         $rawWhoisIps[$ip] = $rawIpWhois;
@@ -1881,10 +2744,29 @@ function performLookupWithProgress($domain) {
             }
         }
         $ip_lookup[$ip] = $res ?: 'N/A';
+        
+        // PTR (reverse DNS) lookup
+        $ptr = trim(shell_exec("dig -x " . escapeshellarg($ip) . " +short 2>/dev/null") ?: '');
+        $ptr = rtrim($ptr, '.'); // Remove trailing dot
+        if ($ptr && !empty($ptr)) {
+            // Verify forward match (PTR hostname should resolve back to this IP)
+            $forwardIps = @gethostbynamel($ptr);
+            $forwardMatch = $forwardIps && in_array($ip, $forwardIps);
+            $ptrRecords[$ip] = [
+                'ptr' => $ptr,
+                'forward_match' => $forwardMatch
+            ];
+        }
     }
 
     // === PHASE 4: HTTP & SSL ===
     sendProgress(4, $total_steps, 'Fetching HTTP headers & SSL...');
+
+    // Capture redirect chain - try HTTPS first, fallback to HTTP
+    $redirectChain = getRedirectChain("https://" . $targetHost);
+    if (empty($redirectChain) || (count($redirectChain) === 1 && $redirectChain[0]['status_code'] === 0)) {
+        $redirectChain = getRedirectChain("http://" . $targetHost);
+    }
 
     // HTTP/HTML from the target host
     $headers = [];
@@ -1910,7 +2792,8 @@ function performLookupWithProgress($domain) {
 
     // WHOIS/RDAP always from root domain (subdomain lookups usually fail)
     $rawWhoisDomain = getRawWhoisDomain($rootDomain);
-    $rawRdap = getRawRdap($rootDomain);
+    // Use cached RDAP from domain existence check if available
+    $rawRdap = $cachedRdap ?? getRawRdap($rootDomain);
 
     // === PHASE 6: Analysis & Save ===
     sendProgress(6, $total_steps, 'Analyzing results...');
@@ -1925,13 +2808,14 @@ function performLookupWithProgress($domain) {
     $technology = detectTechnology($html, $headers);
     $metadataRawFiles = [];
     $metadata = detectMetadata($targetHost, $html, $metadataRawFiles);
+    $indexability = detectSearchEngineBlocking($html, $headers, $metadataRawFiles['robots_txt'] ?? null);
 
     // Store scans under targetHost
     $scanPath = getScanPath($targetHost, $timestamp);
     saveRawFiles($scanPath, $html, $headers, $rawWhoisDomain, $rawWhoisIps, $rawSsl, [
         'records' => $dns_records,
         'zone' => $zoneFile
-    ], $rawRdap, $metadataRawFiles);
+    ], $rawRdap, $metadataRawFiles, $redirectChain, $ptrRecords);
 
     $domainData = $rawRdap ? parseRdap($rawRdap) : [];
     if (empty($domainData)) $domainData = parseRawWhois($rawWhoisDomain);
@@ -1940,11 +2824,35 @@ function performLookupWithProgress($domain) {
     if ($metadata['robots_txt'] && $metadata['robots_txt']['present']) {
         $metadata['robots_txt']['raw_stored'] = !empty($metadataRawFiles['robots_txt']);
     }
-    if ($metadata['sitemap'] && $metadata['sitemap']['present'] && !isset($metadata['sitemap']['urls'])) {
+    if ($metadata['sitemap'] && $metadata['sitemap']['present']) {
         $metadata['sitemap']['raw_stored'] = !empty($metadataRawFiles['sitemap_xml']);
     }
     if ($metadata['security_txt'] && $metadata['security_txt']['present']) {
         $metadata['security_txt']['raw_stored'] = !empty($metadataRawFiles['security_txt']);
+    }
+    if ($metadata['ads_txt'] && $metadata['ads_txt']['present']) {
+        $metadata['ads_txt']['raw_stored'] = !empty($metadataRawFiles['ads_txt']);
+    }
+    if ($metadata['app_ads_txt'] && $metadata['app_ads_txt']['present']) {
+        $metadata['app_ads_txt']['raw_stored'] = !empty($metadataRawFiles['app_ads_txt']);
+    }
+    if ($metadata['app_site_association'] && $metadata['app_site_association']['present']) {
+        $metadata['app_site_association']['raw_stored'] = !empty($metadataRawFiles['app_site_association']);
+    }
+    if ($metadata['assetlinks'] && $metadata['assetlinks']['present']) {
+        $metadata['assetlinks']['raw_stored'] = !empty($metadataRawFiles['assetlinks']);
+    }
+    if ($metadata['manifest'] && $metadata['manifest']['present']) {
+        $metadata['manifest']['raw_stored'] = !empty($metadataRawFiles['manifest']);
+    }
+    if ($metadata['humans_txt'] && $metadata['humans_txt']['present']) {
+        $metadata['humans_txt']['raw_stored'] = !empty($metadataRawFiles['humans_txt']);
+    }
+    if ($metadata['browserconfig'] && $metadata['browserconfig']['present']) {
+        $metadata['browserconfig']['raw_stored'] = !empty($metadataRawFiles['browserconfig']);
+    }
+    if ($metadata['keybase_txt'] && $metadata['keybase_txt']['present']) {
+        $metadata['keybase_txt']['raw_stored'] = !empty($metadataRawFiles['keybase_txt']);
     }
     if ($metadata['favicon'] && $metadata['favicon']['present'] && isset($metadata['favicon']['hash'])) {
         $metadata['favicon']['raw_stored'] = !empty($metadataRawFiles['favicon']);
@@ -1955,9 +2863,10 @@ function performLookupWithProgress($domain) {
         'root_domain' => $rootDomain,
         'is_subdomain' => $isSubdomain,
         'domain' => $domainData, 'dns_records' => $dns_records, 'zone' => $zoneFile,
-        'ip_lookup' => $ip_lookup, 'http_headers' => $headers, 'ssl' => $ssl, 'cms' => $cms,
+        'ip_lookup' => $ip_lookup, 'ptr_records' => $ptrRecords, 'http_headers' => $headers, 'ssl' => $ssl, 'cms' => $cms,
         'infrastructure' => $infra, 'security' => $security, 'technology' => $technology,
-        'metadata' => $metadata, 'errors' => [], 'timestamp' => $timestamp, 'raw_available' => true,
+        'metadata' => $metadata, 'redirect_chain' => $redirectChain, 'indexability' => $indexability,
+        'errors' => [], 'timestamp' => $timestamp, 'raw_available' => true,
         'plugin_version' => PERISCOPE_VERSION
     ];
 
@@ -1972,11 +2881,37 @@ function performLookupWithProgress($domain) {
     return $result;
 }
 
+// --- CLI PROGRESS HELPER ---
+$CLI_MODE = false;
+
+function cliProgress($message) {
+    global $CLI_MODE;
+    if (!$CLI_MODE) return;
+    // Use carriage return to overwrite line, pad with spaces to clear previous text
+    $padded = str_pad($message, 50);
+    echo "\r\033[K  ⏳ $padded";
+    flush();
+}
+
+function cliProgressDone($message) {
+    global $CLI_MODE;
+    if (!$CLI_MODE) return;
+    echo "\r\033[K  ✓ $message\n";
+    flush();
+}
+
 // --- CLI EXECUTION ---
 if (php_sapi_name() === 'cli' && !isset($_SERVER['REQUEST_METHOD'])) {
     if ($argc < 2) { echo "Usage: php engine.php <domain>\n"; exit(1); }
+    $CLI_MODE = true;
     $domain = $argv[1];
-    echo "Looking up domain: $domain...\n\n";
+
+    // Hide cursor during scan
+    echo "\033[?25l";
+    // Ensure cursor is restored on exit (Ctrl+C, errors, etc.)
+    register_shutdown_function(function() { echo "\033[?25h"; });
+
+    echo "\n  🔍 Scanning \033[1m$domain\033[0m\n\n";
     $data = performLookup($domain);
     if ($pdo) {
         // Insert with data=NULL - raw files stored on disk
@@ -1986,11 +2921,29 @@ if (php_sapi_name() === 'cli' && !isset($_SERVER['REQUEST_METHOD'])) {
     $registrar = 'N/A';
     foreach ($data['domain'] as $item) if (stripos($item['name'], 'Registrar') !== false) { $registrar = $item['value']; break; }
     $ips = array_keys($data['ip_lookup']);
-    echo "--- Summary for $domain ---\n";
-    echo "Registrar:     " . $registrar . "\n";
-    echo "IP Addresses:  " . (empty($ips) ? 'N/A' : implode(', ', $ips)) . "\n";
-    echo "---------------------------\n\n";
-    echo "Full report saved to local database.\n";
+
+    echo "\n  \033[1m━━━ Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n\n";
+    echo "  Domain:        \033[36m" . $data['target_host'] . "\033[0m\n";
+    echo "  Registrar:     " . $registrar . "\n";
+    echo "  IP Addresses:  " . (empty($ips) ? 'N/A' : implode(', ', $ips)) . "\n";
+    echo "  DNS Records:   " . count($data['dns_records']) . " found\n";
+    if ($data['ssl'] && $data['ssl']['valid']) {
+        $sslColor = $data['ssl']['days_remaining'] < 30 ? '33' : '32'; // yellow if < 30 days, green otherwise
+        echo "  SSL:           \033[{$sslColor}m" . $data['ssl']['days_remaining'] . " days remaining\033[0m\n";
+    }
+    if ($data['cms']) {
+        echo "  Platform:      " . $data['cms']['name'] . ($data['cms']['version'] ? ' ' . $data['cms']['version'] : '') . "\n";
+    }
+    if ($data['redirect_chain'] && count($data['redirect_chain']) > 1) {
+        $finalUrl = end($data['redirect_chain'])['url'];
+        echo "  Redirects:     " . count($data['redirect_chain']) . " hops → \033[33m" . parse_url($finalUrl, PHP_URL_HOST) . "\033[0m\n";
+    }
+    if (isset($data['indexability']) && $data['indexability']['blocked']) {
+        $reasons = array_map(fn($r) => $r['detail'], $data['indexability']['reasons']);
+        echo "\n  \033[41;37m ⚠ HIDDEN FROM SEARCH ENGINES \033[0m\n";
+        echo "  \033[31m" . implode(', ', $reasons) . "\033[0m\n";
+    }
+    echo "\n  \033[90mSaved to: ~/.periscope/scans/" . $data['target_host'] . "/" . $data['timestamp'] . "/\033[0m\n";
     exit(0);
 }
 
@@ -2032,26 +2985,191 @@ if ($pdo) {
         $limit = 50;
         $offset = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
         $search = isset($_GET['search']) ? trim($_GET['search']) : '';
+        $existence = isset($_GET['existence']) ? $_GET['existence'] : 'all';
+        $platform = isset($_GET['platform']) ? $_GET['platform'] : 'all';
+        $scanCount = isset($_GET['scan_count']) ? $_GET['scan_count'] : 'all';
+
+        // Build dynamic query with filters
+        $where = [];
+        $params = [];
 
         if ($search) {
-            // Search mode - find matching domains
-            $stmt = $pdo->prepare("SELECT id, domain, timestamp FROM history WHERE domain LIKE ? ORDER BY timestamp DESC LIMIT ? OFFSET ?");
-            $stmt->execute(['%' . $search . '%', $limit, $offset]);
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            $countStmt = $pdo->prepare("SELECT COUNT(*) FROM history WHERE domain LIKE ?");
-            $countStmt->execute(['%' . $search . '%']);
-        } else {
-            // Normal mode - paginated list
-            $stmt = $pdo->prepare("SELECT id, domain, timestamp FROM history ORDER BY timestamp DESC LIMIT ? OFFSET ?");
-            $stmt->execute([$limit, $offset]);
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            $countStmt = $pdo->query("SELECT COUNT(*) FROM history");
+            $where[] = "domain LIKE ?";
+            $params[] = '%' . $search . '%';
         }
 
-        $total = $countStmt->fetchColumn();
-        echo json_encode(['items' => $rows, 'total' => (int)$total, 'offset' => $offset, 'limit' => $limit]);
+        // For existence and platform filters, we need to check raw files or cache
+        // This requires a subquery or post-processing since data isn't in the main table
+        $needsDataFilter = ($existence !== 'all' || $platform !== 'all');
+
+        // For scan count filter, use a subquery
+        $havingScanCount = '';
+        if ($scanCount !== 'all') {
+            // Parse dynamic filter value formats: "1", "2-5", "6+"
+            if (preg_match('/^(\d+)$/', $scanCount, $m)) {
+                // Exact match
+                $havingScanCount = 'HAVING COUNT(*) = ' . (int)$m[1];
+            } elseif (preg_match('/^(\d+)-(\d+)$/', $scanCount, $m)) {
+                // Range
+                $havingScanCount = 'HAVING COUNT(*) >= ' . (int)$m[1] . ' AND COUNT(*) <= ' . (int)$m[2];
+            } elseif (preg_match('/^(\d+)\+$/', $scanCount, $m)) {
+                // Open-ended range
+                $havingScanCount = 'HAVING COUNT(*) >= ' . (int)$m[1];
+            }
+        }
+
+        $whereClause = count($where) > 0 ? 'WHERE ' . implode(' AND ', $where) : '';
+
+        if ($scanCount !== 'all') {
+            // Use subquery to filter by scan count per domain
+            $sql = "SELECT h.id, h.domain, h.timestamp FROM history h
+                    INNER JOIN (SELECT domain FROM history $whereClause GROUP BY domain $havingScanCount) filtered
+                    ON h.domain = filtered.domain
+                    " . ($whereClause ? str_replace('WHERE', 'WHERE', $whereClause) : '') . "
+                    ORDER BY h.timestamp DESC";
+            $countSql = "SELECT COUNT(*) FROM history h
+                         INNER JOIN (SELECT domain FROM history $whereClause GROUP BY domain $havingScanCount) filtered
+                         ON h.domain = filtered.domain
+                         " . ($whereClause ? str_replace('WHERE', 'WHERE', $whereClause) : '');
+        } else {
+            $sql = "SELECT id, domain, timestamp FROM history $whereClause ORDER BY timestamp DESC";
+            $countSql = "SELECT COUNT(*) FROM history $whereClause";
+        }
+
+        // Execute count query
+        $countStmt = $pdo->prepare($countSql);
+        $countStmt->execute($params);
+        $total = (int)$countStmt->fetchColumn();
+
+        // Execute main query with limit/offset
+        $sql .= " LIMIT ? OFFSET ?";
+        $params[] = $limit;
+        $params[] = $offset;
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Post-filter for existence and platform if needed
+        if ($needsDataFilter) {
+            $filtered = [];
+            foreach ($rows as $row) {
+                $path = getScanPath($row['domain'], $row['timestamp']);
+                $cache = loadResponseCache($path);
+                $data = $cache ? $cache['data'] : null;
+
+                // If no cache, try to load from raw files (expensive but necessary)
+                if (!$data) {
+                    $raw = loadRawFiles($path);
+                    if (!empty($raw)) {
+                        $data = computeFromRaw($raw, $row['domain'], $row['timestamp'], true);
+                    }
+                }
+
+                // Apply existence filter
+                if ($existence !== 'all') {
+                    $domainExists = !isset($data['domain_exists']) || $data['domain_exists'] !== false;
+                    if ($existence === 'exists' && !$domainExists) continue;
+                    if ($existence === 'nonexistent' && $domainExists) continue;
+                }
+
+                // Apply platform filter
+                if ($platform !== 'all') {
+                    $cmsName = isset($data['cms']['name']) ? $data['cms']['name'] : null;
+                    if ($cmsName !== $platform) continue;
+                }
+
+                $filtered[] = $row;
+            }
+            $rows = $filtered;
+            $total = count($rows); // Approximate - full count would require scanning all records
+        }
+
+        echo json_encode(['items' => $rows, 'total' => $total, 'offset' => $offset, 'limit' => $limit]);
+        exit;
+    }
+    if ($action === 'get_platforms') {
+        // Get distinct platforms from cached scan data
+        $platforms = [];
+        $stmt = $pdo->query("SELECT DISTINCT domain, timestamp FROM history ORDER BY timestamp DESC LIMIT 500");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as $row) {
+            $path = getScanPath($row['domain'], $row['timestamp']);
+            $cache = loadResponseCache($path);
+            if ($cache && isset($cache['data']['cms']['name']) && $cache['data']['cms']['name']) {
+                $platforms[$cache['data']['cms']['name']] = true;
+            }
+        }
+
+        echo json_encode(array_keys($platforms));
+        exit;
+    }
+    if ($action === 'get_scan_counts') {
+        // Get distribution of scan counts per domain
+        $stmt = $pdo->query("SELECT domain, COUNT(*) as cnt FROM history GROUP BY domain");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Build distribution: count -> number of domains with that count
+        $distribution = [];
+        foreach ($rows as $row) {
+            $cnt = (int)$row['cnt'];
+            $distribution[$cnt] = ($distribution[$cnt] ?? 0) + 1;
+        }
+        
+        ksort($distribution);
+        $uniqueCounts = array_keys($distribution);
+        $options = [];
+        
+        // If only a few unique counts, show each individually
+        if (count($uniqueCounts) <= 5) {
+            foreach ($uniqueCounts as $count) {
+                $domains = $distribution[$count];
+                $options[] = [
+                    'value' => (string)$count,
+                    'label' => $count . ' scan' . ($count > 1 ? 's' : '') . ' (' . $domains . ' domain' . ($domains > 1 ? 's' : '') . ')'
+                ];
+            }
+        } else {
+            // Build smart ranges
+            $max = max($uniqueCounts);
+            $ranges = [];
+            
+            // Always include "1 scan" if it exists
+            if (isset($distribution[1])) {
+                $ranges[] = ['min' => 1, 'max' => 1, 'label' => '1 scan'];
+            }
+            
+            // Group remaining into ranges
+            if ($max >= 2) {
+                $mid = min(5, (int)floor($max / 2));
+                if ($mid > 1) {
+                    $ranges[] = ['min' => 2, 'max' => $mid, 'label' => "2-$mid scans"];
+                }
+                if ($max > $mid) {
+                    $ranges[] = ['min' => $mid + 1, 'max' => $max, 'label' => ($mid + 1) . '+ scans'];
+                }
+            }
+            
+            foreach ($ranges as $range) {
+                $domainCount = 0;
+                for ($i = $range['min']; $i <= $range['max']; $i++) {
+                    $domainCount += $distribution[$i] ?? 0;
+                }
+                if ($domainCount > 0) {
+                    $value = $range['min'] === $range['max'] ? (string)$range['min'] : "{$range['min']}-{$range['max']}";
+                    // For open-ended ranges, use + notation
+                    if ($range['max'] === $max && $range['min'] !== $range['max']) {
+                        $value = $range['min'] . '+';
+                    }
+                    $options[] = [
+                        'value' => $value,
+                        'label' => $range['label'] . ' (' . $domainCount . ' domain' . ($domainCount > 1 ? 's' : '') . ')'
+                    ];
+                }
+            }
+        }
+        
+        echo json_encode($options);
         exit;
     }
     if ($action === 'get_domain_versions') {
@@ -2226,6 +3344,22 @@ if ($pdo) {
             $file = "$path/sitemap.xml";
         } elseif ($type === 'security_txt') {
             $file = "$path/security.txt";
+        } elseif ($type === 'ads_txt') {
+            $file = "$path/ads.txt";
+        } elseif ($type === 'app_ads_txt') {
+            $file = "$path/app-ads.txt";
+        } elseif ($type === 'app_site_association') {
+            $file = "$path/apple-app-site-association.json";
+        } elseif ($type === 'assetlinks') {
+            $file = "$path/assetlinks.json";
+        } elseif ($type === 'manifest') {
+            $file = "$path/manifest.json";
+        } elseif ($type === 'humans_txt') {
+            $file = "$path/humans.txt";
+        } elseif ($type === 'browserconfig') {
+            $file = "$path/browserconfig.xml";
+        } elseif ($type === 'keybase_txt') {
+            $file = "$path/keybase.txt";
         } elseif ($type === 'favicon') {
             $file = "$path/favicon.ico";
             if (file_exists($file)) {

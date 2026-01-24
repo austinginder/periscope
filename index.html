@@ -163,7 +163,7 @@
                     </div>
                 </div>
                 <!-- Progress Bar -->
-                <div v-if="loading" class="mt-4 animate-fade-in-up">
+                <div v-if="loading && !loadingFromHistory" class="mt-4 animate-fade-in-up">
                     <div class="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
                         <span>{{ progress.message }}</span>
                         <span>{{ progress.step }}/{{ progress.total }}</span>
@@ -171,6 +171,13 @@
                     <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
                         <div class="bg-gradient-to-r from-cyan-500 to-sky-500 h-2 rounded-full transition-all duration-300 ease-out"
                              :style="{ width: progress.percent + '%' }"></div>
+                    </div>
+                </div>
+                <!-- History Loading -->
+                <div v-if="loading && loadingFromHistory" class="mt-4 animate-fade-in-up">
+                    <div class="flex items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                        <span class="mdi mdi-refresh animate-spin"></span>
+                        <span>Refreshing scan data...</span>
                     </div>
                 </div>
                 <div v-if="response.errors.length > 0" class="mt-4 space-y-2 animate-fade-in-up">
@@ -209,7 +216,44 @@
                         started the script, connect now <span class="mdi mdi-arrow-right ml-1"></span></a></div>
             </div>
 
-            <div v-if="localMode && !response.domain && !loading" class="mt-20 text-center animate-pulse">
+            <div v-if="localMode && !response.domain && !loading && bridgeConnected === false" class="max-w-2xl mx-auto mt-16 animate-fade-in-up">
+                <div class="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded-md shadow-sm mb-8">
+                    <div class="flex">
+                        <div class="flex-shrink-0"><span class="mdi mdi-lan-disconnect text-red-500"></span></div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-red-700 dark:text-red-200">Network Connection Failed</p>
+                            <p class="text-xs text-red-600 dark:text-red-300 mt-1">Unable to connect to local bridge at 127.0.0.1:8989</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-center">
+                    <h2 class="text-2xl font-bold text-slate-900 dark:text-white mb-4">Run searches locally</h2>
+                    <p class="text-slate-600 dark:text-slate-400 mb-8">Periscope connects to your local terminal to run
+                        `dig` and `whois` commands securely.</p>
+                    <div class="relative group text-left mx-auto max-w-xl">
+                        <div
+                            class="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-lg blur opacity-30 group-hover:opacity-60 transition duration-1000 group-hover:duration-200">
+                        </div>
+                        <div
+                            class="relative bg-slate-900 rounded-lg p-4 shadow-2xl border border-slate-800 flex items-center justify-between overflow-hidden">
+                            <div class="overflow-x-auto custom-scroll mr-2"><code
+                                    class="font-mono text-cyan-400 text-sm sm:text-base whitespace-nowrap">curl -sL https://periscope.run/boot.sh | bash</code>
+                            </div>
+                            <button @click="copyInstallCmd"
+                                class="p-2 text-slate-500 hover:text-white transition-colors flex-shrink-0"
+                                title="Copy Command"><span class="mdi mdi-content-copy"></span></button>
+                        </div>
+                    </div>
+                    <div class="mt-8">
+                        <button @click="checkBridgeCapabilities"
+                            class="inline-flex items-center text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:underline">
+                            <span class="mdi mdi-refresh mr-1"></span> Retry connection
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="localMode && !response.domain && !loading && bridgeConnected === true" class="mt-20 text-center animate-pulse">
                 <div class="text-slate-400 dark:text-slate-600 text-sm flex flex-col items-center gap-2">
                     <span class="mdi mdi-lan-connect text-4xl text-cyan-500"></span>
                     <p class="font-medium text-slate-600 dark:text-slate-300">Local Bridge Active</p>
@@ -217,7 +261,40 @@
                 </div>
             </div>
 
-            <div v-if="response.domain" class="animate-fade-in-up">
+            <div v-if="localMode && !response.domain && !loading && bridgeConnected === null" class="mt-20 text-center animate-pulse">
+                <div class="text-slate-400 dark:text-slate-600 text-sm flex flex-col items-center gap-2">
+                    <span class="mdi mdi-lan-pending text-4xl text-slate-400"></span>
+                    <p class="font-medium text-slate-600 dark:text-slate-300">Connecting to Local Bridge...</p>
+                </div>
+            </div>
+
+            <!-- Domain Does Not Exist -->
+            <div v-if="response.domain_exists === false" class="animate-fade-in-up">
+                <div class="mb-6 flex justify-center items-center gap-4">
+                    <span v-if="response.timestamp" class="text-sm text-slate-500 dark:text-slate-400">
+                        <span class="mdi mdi-clock-outline mr-1"></span>
+                        {{ new Date(response.timestamp * 1000).toLocaleString() }}
+                    </span>
+                    <button v-if="otherVersions.length > 0" @click="showVersionsModal = true"
+                        class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-colors border border-cyan-200 dark:border-cyan-800/50">
+                        <span class="mdi mdi-history mr-1"></span> {{ otherVersions.length }} other scans
+                    </button>
+                </div>
+                <div class="max-w-xl mx-auto text-center py-16">
+                    <div class="mb-6">
+                        <span class="mdi mdi-domain-off text-7xl text-slate-300 dark:text-slate-600"></span>
+                    </div>
+                    <h2 class="text-2xl font-bold text-slate-700 dark:text-slate-200 mb-3">Domain Not Registered</h2>
+                    <p class="text-slate-500 dark:text-slate-400 mb-2">
+                        The domain <span class="font-mono font-medium text-slate-700 dark:text-slate-300">{{ response.root_domain }}</span> does not exist.
+                    </p>
+                    <p class="text-sm text-slate-400 dark:text-slate-500">
+                        This domain is not currently registered with any registrar.
+                    </p>
+                </div>
+            </div>
+
+            <div v-if="response.timestamp && response.domain_exists !== false" class="animate-fade-in-up">
                 <div class="mb-6 flex justify-center items-center gap-4">
                     <span v-if="response.timestamp" class="text-sm text-slate-500 dark:text-slate-400">
                         <span class="mdi mdi-clock-outline mr-1"></span>
@@ -239,6 +316,48 @@
                         <span class="font-mono font-medium text-indigo-700 dark:text-indigo-300">{{ response.target_host }}</span>
                         <span class="text-indigo-400 dark:text-indigo-500">of</span>
                         <span class="font-mono text-indigo-600 dark:text-indigo-400">{{ response.root_domain }}</span>
+                    </div>
+                </div>
+
+                <!-- Redirect chain indicator -->
+                <div v-if="response.redirect_chain && response.redirect_chain.length > 1" class="mb-6 flex justify-center">
+                    <div class="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm"
+                        :class="isCrossDomainRedirect
+                            ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50'
+                            : 'bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50'">
+                        <span :class="isCrossDomainRedirect ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'">
+                            <span class="mdi mdi-redirect mr-1"></span>
+                            Redirects
+                        </span>
+                        <template v-for="(hop, index) in response.redirect_chain" :key="index">
+                            <span class="inline-flex items-center gap-1.5">
+                                <span class="font-mono font-medium"
+                                    :class="isCrossDomainRedirect ? 'text-amber-700 dark:text-amber-300' : 'text-slate-700 dark:text-slate-300'">{{ getHostFromUrl(hop.url) }}</span>
+                                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                                    :class="{
+                                        'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400': hop.status_code === 200,
+                                        'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-400': hop.status_code === 301 || hop.status_code === 308,
+                                        'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400': hop.status_code === 302 || hop.status_code === 303 || hop.status_code === 307,
+                                        'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400': hop.status_code >= 400
+                                    }">{{ hop.status_code }}</span>
+                            </span>
+                            <span v-if="index < response.redirect_chain.length - 1"
+                                :class="isCrossDomainRedirect ? 'text-amber-400 dark:text-amber-600' : 'text-slate-400 dark:text-slate-600'"
+                                class="mdi mdi-arrow-right"></span>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Search engine blocking warning -->
+                <div v-if="response.indexability && response.indexability.blocked" class="mb-6 flex justify-center">
+                    <div class="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50">
+                        <span class="text-red-600 dark:text-red-400 font-medium">
+                            <span class="mdi mdi-eye-off mr-1"></span>
+                            Hidden from Search Engines
+                        </span>
+                        <span class="text-red-500 dark:text-red-400 text-xs">
+                            ({{ response.indexability.reasons.map(r => r.detail).join(', ') }})
+                        </span>
                     </div>
                 </div>
 
@@ -276,7 +395,7 @@
                         </div>
                     </div>
 
-                    <div v-if="response.cms || response.raw_available" class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                    <div v-if="(response.cms && !Array.isArray(response.cms)) || (response.raw_available && response.domain_exists !== false)" class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                         <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
                             <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
                                 <span class="mdi mdi-application-cog mr-1"></span> Platform
@@ -312,7 +431,7 @@
                         </div>
                     </div>
 
-                    <div v-if="response.infrastructure"
+                    <div v-if="response.infrastructure && !Array.isArray(response.infrastructure) && (response.infrastructure.host || response.infrastructure.cdn || response.infrastructure.server)"
                         class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                         <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
                             <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
@@ -341,7 +460,7 @@
                 <!-- Security, Technology, and Metadata Row -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                     <!-- Security Headers -->
-                    <div v-if="response.security"
+                    <div v-if="response.security && response.security.score"
                         class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                         <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex justify-between items-center">
                             <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
@@ -388,7 +507,7 @@
                     </div>
 
                     <!-- Technology Stack -->
-                    <div v-if="response.technology && (response.technology.frameworks.length > 0 || response.technology.analytics.length > 0 || response.technology.ecommerce.length > 0 || response.technology.widgets.length > 0)"
+                    <div v-if="response.technology && !Array.isArray(response.technology) && (response.technology.frameworks?.length > 0 || response.technology.analytics?.length > 0 || response.technology.ecommerce?.length > 0 || response.technology.widgets?.length > 0)"
                         class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                         <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
                             <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
@@ -424,7 +543,7 @@
                     </div>
 
                     <!-- Metadata -->
-                    <div v-if="response.metadata"
+                    <div v-if="response.metadata && !Array.isArray(response.metadata) && Object.keys(response.metadata).length > 0"
                         class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                         <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
                             <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
@@ -432,71 +551,248 @@
                             </h3>
                         </div>
                         <div class="p-4 space-y-2 text-xs">
-                            <div class="flex items-center justify-between">
+                            <!-- Found items -->
+                            <div v-if="response.metadata.robots_txt && response.metadata.robots_txt.present" class="flex items-center justify-between">
                                 <span class="flex items-center gap-1">
                                     <span class="text-slate-600 dark:text-slate-400">robots.txt</span>
-                                    <button v-if="response.metadata.robots_txt && response.metadata.robots_txt.raw_stored" @click="showRawPreview('robots_txt', 'robots.txt')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                    <button v-if="response.metadata.robots_txt.raw_stored" @click="showRawPreview('robots_txt', 'robots.txt')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
                                         <span class="mdi mdi-eye-outline"></span>
                                     </button>
                                 </span>
-                                <span v-if="response.metadata.robots_txt && response.metadata.robots_txt.present" class="text-emerald-600 dark:text-emerald-400">
+                                <span class="text-emerald-600 dark:text-emerald-400">
                                     <span class="mdi mdi-check-circle"></span>
                                     <span v-if="response.metadata.robots_txt.disallow_count > 0" class="ml-1 text-slate-500">({{ response.metadata.robots_txt.disallow_count }} rules)</span>
                                 </span>
-                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
                             </div>
-                            <div class="flex items-center justify-between">
+                            <div v-if="response.metadata.sitemap && response.metadata.sitemap.present" class="flex items-center justify-between">
                                 <span class="flex items-center gap-1">
                                     <span class="text-slate-600 dark:text-slate-400">sitemap.xml</span>
-                                    <button v-if="response.metadata.sitemap && response.metadata.sitemap.raw_stored" @click="showRawPreview('sitemap_xml', 'sitemap.xml')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                    <button v-if="response.metadata.sitemap.raw_stored" @click="showRawPreview('sitemap_xml', 'sitemap.xml')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
                                         <span class="mdi mdi-eye-outline"></span>
                                     </button>
                                 </span>
-                                <span v-if="response.metadata.sitemap && response.metadata.sitemap.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
-                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                <span class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
                             </div>
-                            <div class="flex items-center justify-between">
+                            <div v-if="response.metadata.security_txt && response.metadata.security_txt.present" class="flex items-center justify-between">
                                 <span class="flex items-center gap-1">
                                     <span class="text-slate-600 dark:text-slate-400">security.txt</span>
-                                    <button v-if="response.metadata.security_txt && response.metadata.security_txt.raw_stored" @click="showRawPreview('security_txt', 'security.txt')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                    <button v-if="response.metadata.security_txt.raw_stored" @click="showRawPreview('security_txt', 'security.txt')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
                                         <span class="mdi mdi-eye-outline"></span>
                                     </button>
                                 </span>
-                                <span v-if="response.metadata.security_txt && response.metadata.security_txt.present" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
-                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                <span class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
                             </div>
-                            <div class="flex items-center justify-between">
+                            <div v-if="response.metadata.ads_txt && response.metadata.ads_txt.present" class="flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">ads.txt</span>
+                                    <button v-if="response.metadata.ads_txt.raw_stored" @click="showRawPreview('ads_txt', 'ads.txt')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
+                                <span class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span v-if="response.metadata.ads_txt.seller_count" class="ml-1 text-slate-500">({{ response.metadata.ads_txt.seller_count }} sellers)</span>
+                                </span>
+                            </div>
+                            <div v-if="response.metadata.app_ads_txt && response.metadata.app_ads_txt.present" class="flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">app-ads.txt</span>
+                                    <button v-if="response.metadata.app_ads_txt.raw_stored" @click="showRawPreview('app_ads_txt', 'app-ads.txt')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
+                                <span class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span v-if="response.metadata.app_ads_txt.seller_count" class="ml-1 text-slate-500">({{ response.metadata.app_ads_txt.seller_count }} sellers)</span>
+                                </span>
+                            </div>
+                            <div v-if="response.metadata.app_site_association && response.metadata.app_site_association.present" class="flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">apple-app-site-association</span>
+                                    <button v-if="response.metadata.app_site_association.raw_stored" @click="showRawPreview('app_site_association', 'apple-app-site-association')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
+                                <span class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span v-if="response.metadata.app_site_association.app_ids && response.metadata.app_site_association.app_ids.length" class="ml-1 text-slate-500">({{ response.metadata.app_site_association.app_ids.length }} apps)</span>
+                                </span>
+                            </div>
+                            <div v-if="response.metadata.assetlinks && response.metadata.assetlinks.present" class="flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">assetlinks.json</span>
+                                    <button v-if="response.metadata.assetlinks.raw_stored" @click="showRawPreview('assetlinks', 'assetlinks.json')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
+                                <span class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span v-if="response.metadata.assetlinks.packages && response.metadata.assetlinks.packages.length" class="ml-1 text-slate-500">({{ response.metadata.assetlinks.packages.length }} apps)</span>
+                                </span>
+                            </div>
+                            <div v-if="response.metadata.manifest && response.metadata.manifest.present" class="flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">manifest.json</span>
+                                    <button v-if="response.metadata.manifest.raw_stored" @click="showRawPreview('manifest', 'manifest.json')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
+                                <span class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span v-if="response.metadata.manifest.display" class="ml-1 text-slate-500">({{ response.metadata.manifest.display }})</span>
+                                </span>
+                            </div>
+                            <div v-if="response.metadata.webfinger && response.metadata.webfinger.present" class="flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">webfinger</span>
+                                </span>
+                                <span class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span class="ml-1 text-slate-500">(Fediverse)</span>
+                                </span>
+                            </div>
+                            <div v-if="response.metadata.change_password && response.metadata.change_password.present" class="flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">change-password</span>
+                                </span>
+                                <span class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span v-if="response.metadata.change_password.status >= 300 && response.metadata.change_password.status < 400" class="ml-1 text-slate-500">(redirects)</span>
+                                </span>
+                            </div>
+                            <div v-if="response.metadata.humans_txt && response.metadata.humans_txt.present" class="flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">humans.txt</span>
+                                    <button v-if="response.metadata.humans_txt.raw_stored" @click="showRawPreview('humans_txt', 'humans.txt')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
+                                <span class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                            </div>
+                            <div v-if="response.metadata.browserconfig && response.metadata.browserconfig.present" class="flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">browserconfig.xml</span>
+                                    <button v-if="response.metadata.browserconfig.raw_stored" @click="showRawPreview('browserconfig', 'browserconfig.xml')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
+                                <span class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                            </div>
+                            <div v-if="response.metadata.keybase_txt && response.metadata.keybase_txt.present" class="flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-slate-600 dark:text-slate-400">keybase.txt</span>
+                                    <button v-if="response.metadata.keybase_txt.raw_stored" @click="showRawPreview('keybase_txt', 'keybase.txt')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                        <span class="mdi mdi-eye-outline"></span>
+                                    </button>
+                                </span>
+                                <span class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span v-if="response.metadata.keybase_txt.username" class="ml-1 text-slate-500">({{ response.metadata.keybase_txt.username }})</span>
+                                </span>
+                            </div>
+                            <div v-if="response.metadata.meta_tags && response.metadata.meta_tags.open_graph" class="flex items-center justify-between">
                                 <span class="flex items-center gap-1">
                                     <span class="text-slate-600 dark:text-slate-400">Open Graph</span>
-                                    <button v-if="response.metadata.meta_tags && response.metadata.meta_tags.open_graph" @click="showOgPreview = true" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                    <button @click="showOgPreview = true" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
                                         <span class="mdi mdi-eye-outline"></span>
                                     </button>
                                 </span>
-                                <span v-if="response.metadata.meta_tags && response.metadata.meta_tags.open_graph" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
-                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                <span class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
                             </div>
-                            <div class="flex items-center justify-between">
+                            <div v-if="response.metadata.meta_tags && response.metadata.meta_tags.twitter" class="flex items-center justify-between">
                                 <span class="flex items-center gap-1">
                                     <span class="text-slate-600 dark:text-slate-400">Twitter Card</span>
-                                    <button v-if="response.metadata.meta_tags && response.metadata.meta_tags.twitter" @click="showTwitterPreview = true" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                    <button @click="showTwitterPreview = true" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
                                         <span class="mdi mdi-eye-outline"></span>
                                     </button>
                                 </span>
-                                <span v-if="response.metadata.meta_tags && response.metadata.meta_tags.twitter" class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
-                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                <span class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
                             </div>
-                            <div class="flex items-center justify-between">
+                            <div v-if="response.metadata.favicon && response.metadata.favicon.present" class="flex items-center justify-between">
                                 <span class="flex items-center gap-1">
                                     <span class="text-slate-600 dark:text-slate-400">Favicon</span>
-                                    <button v-if="response.metadata.favicon && response.metadata.favicon.raw_stored" @click="showFaviconPreview = true" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                    <button v-if="response.metadata.favicon.raw_stored" @click="showFaviconPreview = true" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
                                         <span class="mdi mdi-eye-outline"></span>
                                     </button>
                                 </span>
-                                <span v-if="response.metadata.favicon && response.metadata.favicon.present" class="text-emerald-600 dark:text-emerald-400">
+                                <span class="text-emerald-600 dark:text-emerald-400">
                                     <span class="mdi mdi-check-circle"></span>
                                     <span v-if="response.metadata.favicon.hash" class="ml-1 font-mono text-slate-500">{{ response.metadata.favicon.hash.substring(0, 8) }}...</span>
                                 </span>
-                                <span v-else class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                            </div>
+
+                            <!-- Toggle for missing items -->
+                            <button v-if="missingMetadataCount > 0" @click="showMissingMetadata = !showMissingMetadata" class="flex items-center gap-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 w-full">
+                                <span class="mdi" :class="showMissingMetadata ? 'mdi-chevron-up' : 'mdi-chevron-down'"></span>
+                                <span>{{ showMissingMetadata ? 'Hide' : 'Show' }} {{ missingMetadataCount }} not found</span>
+                            </button>
+
+                            <!-- Missing items (hidden by default) -->
+                            <div v-if="showMissingMetadata" class="space-y-2 pt-2">
+                                <div v-if="!response.metadata.robots_txt || !response.metadata.robots_txt.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">robots.txt</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.sitemap || !response.metadata.sitemap.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">sitemap.xml</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.security_txt || !response.metadata.security_txt.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">security.txt</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.ads_txt || !response.metadata.ads_txt.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">ads.txt</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.app_ads_txt || !response.metadata.app_ads_txt.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">app-ads.txt</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.app_site_association || !response.metadata.app_site_association.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">apple-app-site-association</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.assetlinks || !response.metadata.assetlinks.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">assetlinks.json</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.manifest || !response.metadata.manifest.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">manifest.json</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.webfinger || !response.metadata.webfinger.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">webfinger</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.change_password || !response.metadata.change_password.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">change-password</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.humans_txt || !response.metadata.humans_txt.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">humans.txt</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.browserconfig || !response.metadata.browserconfig.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">browserconfig.xml</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.keybase_txt || !response.metadata.keybase_txt.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">keybase.txt</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.meta_tags || !response.metadata.meta_tags.open_graph" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">Open Graph</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.meta_tags || !response.metadata.meta_tags.twitter" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">Twitter Card</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
+                                <div v-if="!response.metadata.favicon || !response.metadata.favicon.present" class="flex items-center justify-between">
+                                    <span class="text-slate-600 dark:text-slate-400">Favicon</span>
+                                    <span class="text-slate-300 dark:text-slate-600"><span class="mdi mdi-close-circle"></span></span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -551,7 +847,7 @@
                                                 class="text-xs px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">View WHOIS</button>
                                         </div>
                                         <div class="space-y-1">
-                                            <div v-for="row in rows.split('\n')" class="grid grid-cols-3 gap-2 text-xs">
+                                            <div v-for="row in rows.split('\n').filter(r => r.split(':')[1] && r.split(':')[1].trim() && r.split(':')[1].trim() !== 'N/A')" class="grid grid-cols-3 gap-2 text-xs">
                                                 <span class="text-slate-500 dark:text-slate-400">{{ row.split(":")[0]
                                                     }}</span>
                                                 <span
@@ -559,6 +855,30 @@
                                                     :title="row.split(':')[1]"
                                                     @contextmenu.prevent="showContextMenu($event, row.split(':')[1])">{{
                                                     row.split(":")[1] }}</span>
+                                            </div>
+                                        </div>
+                                        <!-- PTR Record (Reverse DNS) -->
+                                        <div v-if="response.ptr_records && response.ptr_records[ip]" 
+                                            class="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                                            <div class="grid grid-cols-3 gap-2 text-xs">
+                                                <span class="text-slate-500 dark:text-slate-400">PTR</span>
+                                                <div class="col-span-2 flex items-center gap-2">
+                                                    <span class="text-slate-800 dark:text-slate-300 font-mono truncate"
+                                                        :title="response.ptr_records[ip].ptr"
+                                                        @contextmenu.prevent="showContextMenu($event, response.ptr_records[ip].ptr)">
+                                                        {{ response.ptr_records[ip].ptr }}
+                                                    </span>
+                                                    <span v-if="response.ptr_records[ip].forward_match" 
+                                                        class="inline-flex items-center gap-0.5 text-[10px] text-emerald-600 dark:text-emerald-400"
+                                                        title="Forward lookup matches - PTR resolves back to this IP">
+                                                        <span class="mdi mdi-check-circle"></span> Verified
+                                                    </span>
+                                                    <span v-else 
+                                                        class="inline-flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-400"
+                                                        title="Forward lookup mismatch - PTR does not resolve back to this IP">
+                                                        <span class="mdi mdi-alert"></span> Mismatch
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -592,6 +912,90 @@
                     </div>
 
                     <div class="md:col-span-7 space-y-6">
+                        <!-- SPF Analysis -->
+                        <div v-if="spfAnalysis" class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                            <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex items-center justify-between">
+                                <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
+                                    SPF Analysis
+                                </h3>
+                                <div class="flex items-center gap-2">
+                                    <span v-if="spfAnalysis.isValid && !spfAnalysis.hasWarnings"
+                                        class="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                        <span class="mdi mdi-check-circle"></span> Valid
+                                    </span>
+                                    <span v-else-if="spfAnalysis.isValid && spfAnalysis.hasWarnings"
+                                        class="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400">
+                                        <span class="mdi mdi-alert"></span> Valid with warnings
+                                    </span>
+                                    <span v-else
+                                        class="inline-flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
+                                        <span class="mdi mdi-close-circle"></span> Invalid
+                                    </span>
+                                    <span class="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                                        {{ spfAnalysis.dnsLookups }}/10 lookups
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- Errors -->
+                            <div v-if="spfAnalysis.errors.length > 0" class="px-5 py-3 bg-red-50 dark:bg-red-900/20 border-b border-red-100 dark:border-red-900/30">
+                                <div v-for="error in spfAnalysis.errors" class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300">
+                                    <span class="mdi mdi-close-circle mt-0.5 flex-shrink-0"></span>
+                                    <span>{{ error }}</span>
+                                </div>
+                            </div>
+
+                            <!-- Warnings -->
+                            <div v-if="spfAnalysis.warnings.length > 0" class="px-5 py-3 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-100 dark:border-amber-900/30">
+                                <div v-for="warning in spfAnalysis.warnings" class="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300">
+                                    <span class="mdi mdi-alert mt-0.5 flex-shrink-0"></span>
+                                    <span>{{ warning }}</span>
+                                </div>
+                            </div>
+
+                            <!-- Mechanisms breakdown -->
+                            <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                                <div v-for="m in spfAnalysis.mechanisms" :key="m.raw"
+                                    class="px-5 py-3 flex items-center gap-4 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                                    <div class="flex-shrink-0 w-8 text-center">
+                                        <span v-if="m.type === 'version'" class="mdi mdi-tag text-slate-400"></span>
+                                        <span v-else-if="m.type === 'include'" class="mdi mdi-call-merge text-cyan-500"></span>
+                                        <span v-else-if="m.type === 'ip4' || m.type === 'ip6'" class="mdi mdi-ip text-emerald-500"></span>
+                                        <span v-else-if="m.type === 'a'" class="mdi mdi-alpha-a-circle text-blue-500"></span>
+                                        <span v-else-if="m.type === 'mx'" class="mdi mdi-email text-purple-500"></span>
+                                        <span v-else-if="m.type === 'all'" class="mdi mdi-shield text-slate-500"></span>
+                                        <span v-else-if="m.type === 'redirect'" class="mdi mdi-arrow-right-bold text-orange-500"></span>
+                                        <span v-else class="mdi mdi-cog text-slate-400"></span>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-2">
+                                            <code class="text-xs font-mono text-slate-700 dark:text-slate-300">{{ m.raw }}</code>
+                                            <span v-if="m.provider"
+                                                class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300">
+                                                {{ m.provider }}
+                                            </span>
+                                            <span v-if="m.isDnsLookup"
+                                                class="inline-flex items-center gap-0.5 text-[10px] text-slate-400" title="Requires DNS lookup">
+                                                <span class="mdi mdi-dns"></span>
+                                            </span>
+                                        </div>
+                                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{{ m.description }}</p>
+                                    </div>
+                                    <div v-if="m.qualifier && m.type !== 'version'" class="flex-shrink-0">
+                                        <span class="text-xs font-mono px-1.5 py-0.5 rounded"
+                                            :class="{
+                                                'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300': m.qualifier === '+',
+                                                'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300': m.qualifier === '-',
+                                                'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300': m.qualifier === '~',
+                                                'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400': m.qualifier === '?'
+                                            }">
+                                            {{ m.qualifierDesc }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div
                             class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                             <div
@@ -726,12 +1130,35 @@
                                     class="mdi mdi-close"></span></button>
                         </div>
                     </div>
-                    <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+                    <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 space-y-3">
                         <div class="relative">
                             <span class="mdi mdi-magnify absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></span>
                             <input v-model="historySearch" @input="searchHistory" type="text" ref="historySearchInput"
                                 class="w-full pl-10 pr-4 py-2 text-sm bg-slate-100 dark:bg-slate-800 border-0 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-500"
                                 placeholder="Search domains...">
+                        </div>
+                        <div class="flex gap-2 flex-wrap">
+                            <select v-model="historyFilters.existence" @change="applyHistoryFilters"
+                                class="text-xs bg-slate-100 dark:bg-slate-800 border-0 rounded-lg text-slate-700 dark:text-slate-300 py-1.5 px-2 focus:ring-2 focus:ring-cyan-500">
+                                <option value="all">All Domains</option>
+                                <option value="exists">Exists</option>
+                                <option value="nonexistent">Non-existent</option>
+                            </select>
+                            <select v-model="historyFilters.platform" @change="applyHistoryFilters"
+                                class="text-xs bg-slate-100 dark:bg-slate-800 border-0 rounded-lg text-slate-700 dark:text-slate-300 py-1.5 px-2 focus:ring-2 focus:ring-cyan-500">
+                                <option value="all">Any Platform</option>
+                                <option v-for="platform in availablePlatforms" :key="platform" :value="platform">{{ platform }}</option>
+                            </select>
+                            <select v-model="historyFilters.scanCount" @change="applyHistoryFilters"
+                                class="text-xs bg-slate-100 dark:bg-slate-800 border-0 rounded-lg text-slate-700 dark:text-slate-300 py-1.5 px-2 focus:ring-2 focus:ring-cyan-500">
+                                <option value="all">Any # Scans</option>
+                                <option v-for="opt in scanCountOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                            </select>
+                            <button v-if="historyFilters.existence !== 'all' || historyFilters.platform !== 'all' || historyFilters.scanCount !== 'all'"
+                                @click="clearHistoryFilters"
+                                class="text-xs text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400 py-1.5 px-2">
+                                <span class="mdi mdi-close"></span> Clear
+                            </button>
                         </div>
                     </div>
                     <div class="max-h-[50vh] overflow-y-auto custom-scroll">
@@ -755,7 +1182,7 @@
                         </ul>
                         <div v-else class="text-center py-12"><span
                                 class="mdi mdi-history text-5xl text-slate-200 dark:text-slate-700"></span>
-                            <p class="mt-2 text-slate-500">{{ historySearch ? 'No matches found' : 'Log empty' }}</p>
+                            <p class="mt-2 text-slate-500">{{ historySearch || historyFilters.existence !== 'all' || historyFilters.platform !== 'all' || historyFilters.scanCount !== 'all' ? 'No matches found' : 'Log empty' }}</p>
                         </div>
                     </div>
                     <div v-if="historyItems.length > 0 && historyItems.length < historyTotal"
@@ -1006,6 +1433,14 @@
                                 <span class="text-slate-500 dark:text-slate-400">twitter:site</span>
                                 <span class="font-mono text-slate-700 dark:text-slate-300">{{ response.metadata.meta_tags.twitter.site }}</span>
                             </div>
+                            <div v-if="response.metadata.meta_tags.twitter?.image_hash" class="flex justify-between gap-2">
+                                <span class="text-slate-500 dark:text-slate-400 shrink-0">Stored</span>
+                                <span class="font-mono text-slate-700 dark:text-slate-300">{{ response.metadata.meta_tags.twitter.image_extension?.toUpperCase() }} · {{ formatBytes(response.metadata.meta_tags.twitter.image_size) }}</span>
+                            </div>
+                            <div v-else-if="response.metadata.meta_tags.open_graph?.image_hash" class="flex justify-between gap-2">
+                                <span class="text-slate-500 dark:text-slate-400 shrink-0">Stored (from OG)</span>
+                                <span class="font-mono text-slate-700 dark:text-slate-300">{{ response.metadata.meta_tags.open_graph.image_extension?.toUpperCase() }} · {{ formatBytes(response.metadata.meta_tags.open_graph.image_size) }}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1122,8 +1557,10 @@
                     domain: "",
                     loading: false,
                     loadingText: "Scanning...",
+                    loadingFromHistory: false,
                     progress: { step: 0, total: 6, percent: 0, message: '' },
                     localMode: false,
+                    bridgeConnected: null,
                     bridgeHasDb: false,
                     dbInfo: { path: '', size: 0, scanCount: 0 },
                     scansInfo: { path: '', size: 0 },
@@ -1131,6 +1568,9 @@
                     response: { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} },
                     currentTheme: localStorage.getItem('theme') || (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
                     showHistoryModal: false, historyItems: [], historyTotal: 0, historySearch: '', showVersionsModal: false, domainVersions: [], showAutocomplete: false,
+                    historyFilters: { existence: 'all', platform: 'all', scanCount: 'all' },
+                    availablePlatforms: [],
+                    scanCountOptions: [],
                     snackbar: { show: false, message: "" },
                     contextMenu: { show: false, x: 0, y: 0, value: '' },
                     dialog: { show: false, title: '', content: '', tabs: null, activeTab: null },
@@ -1140,6 +1580,7 @@
                     showOgPreview: false,
                     showTwitterPreview: false,
                     showFaviconPreview: false,
+                    showMissingMetadata: false,
                     showPluginsModal: false,
                     version: '1.2',
                     pendingDeepLink: null,
@@ -1158,7 +1599,10 @@
                     if (val) {
                         this.selectedHistoryIndex = -1;
                         this.historySearch = '';
+                        this.historyFilters = { existence: 'all', platform: 'all', scanCount: 'all' };
                         this.loadHistory();
+                        this.loadAvailablePlatforms();
+                        this.loadScanCountOptions();
                         this.$nextTick(() => {
                             if (this.$refs.historySearchInput) this.$refs.historySearchInput.focus();
                         });
@@ -1176,6 +1620,28 @@
                         return a.value.localeCompare(b.value);
                     });
                 },
+                missingMetadataCount() {
+                    if (!this.response.metadata) return 0;
+                    const m = this.response.metadata;
+                    let count = 0;
+                    if (!m.robots_txt?.present) count++;
+                    if (!m.sitemap?.present) count++;
+                    if (!m.security_txt?.present) count++;
+                    if (!m.ads_txt?.present) count++;
+                    if (!m.app_ads_txt?.present) count++;
+                    if (!m.app_site_association?.present) count++;
+                    if (!m.assetlinks?.present) count++;
+                    if (!m.manifest?.present) count++;
+                    if (!m.webfinger?.present) count++;
+                    if (!m.change_password?.present) count++;
+                    if (!m.humans_txt?.present) count++;
+                    if (!m.browserconfig?.present) count++;
+                    if (!m.keybase_txt?.present) count++;
+                    if (!m.meta_tags?.open_graph) count++;
+                    if (!m.meta_tags?.twitter) count++;
+                    if (!m.favicon?.present) count++;
+                    return count;
+                },
                 otherVersions() {
                     if (!this.response.timestamp) return [];
                     return this.domainVersions.filter(v => v.timestamp != this.response.timestamp);
@@ -1191,6 +1657,234 @@
                         if (unique.length >= 8) break;
                     }
                     return unique;
+                },
+                activeFilterCount() {
+                    let count = 0;
+                    if (this.historyFilters.existence !== 'all') count++;
+                    if (this.historyFilters.platform !== 'all') count++;
+                    if (this.historyFilters.scanCount !== 'all') count++;
+                    return count;
+                },
+                isCrossDomainRedirect() {
+                    if (!this.response.redirect_chain || this.response.redirect_chain.length < 2) return false;
+                    const first = this.response.redirect_chain[0];
+                    const last = this.response.redirect_chain[this.response.redirect_chain.length - 1];
+                    try {
+                        const firstHost = new URL(first.url).hostname.replace(/^www\./, '');
+                        const lastHost = new URL(last.url).hostname.replace(/^www\./, '');
+                        // Extract root domain (last two parts) for comparison
+                        const getRoot = (h) => h.split('.').slice(-2).join('.');
+                        return getRoot(firstHost) !== getRoot(lastHost);
+                    } catch { return false; }
+                },
+                spfAnalysis() {
+                    if (!this.response.dns_records) return null;
+                    
+                    // Find SPF record (TXT record starting with v=spf1, may be wrapped in quotes)
+                    const spfRecord = this.response.dns_records.find(r => {
+                        if (r.type !== 'TXT') return false;
+                        const val = r.value.replace(/^["']|["']$/g, '').trim();
+                        return val.toLowerCase().startsWith('v=spf1');
+                    });
+                    
+                    if (!spfRecord) return null;
+                    
+                    // Strip surrounding quotes from the value
+                    const raw = spfRecord.value.replace(/^["']|["']$/g, '').trim();
+                    const parts = raw.split(/\s+/);
+                    const mechanisms = [];
+                    const errors = [];
+                    const warnings = [];
+                    let dnsLookups = 0;
+                    let hasAll = false;
+                    let allQualifier = '';
+                    
+                    // Known providers for include: mechanisms
+                    const knownProviders = {
+                        '_spf.google.com': 'Google Workspace',
+                        'googlemail.com': 'Google Workspace',
+                        '_spf.salesforce.com': 'Salesforce',
+                        'sendgrid.net': 'SendGrid',
+                        'spf.protection.outlook.com': 'Microsoft 365',
+                        'amazonses.com': 'Amazon SES',
+                        'servers.mcsv.net': 'Mailchimp',
+                        'mailchimp.com': 'Mailchimp',
+                        'spf.mailjet.com': 'Mailjet',
+                        'mail.zendesk.com': 'Zendesk',
+                        'helpscoutemail.com': 'Help Scout',
+                        'freshdesk.com': 'Freshdesk',
+                        'hubspot.com': 'HubSpot',
+                        'intercom.io': 'Intercom',
+                        'aspmx.pardot.com': 'Pardot',
+                        'mktomail.com': 'Marketo',
+                        'spf.constantcontact.com': 'Constant Contact',
+                        'postmarkapp.com': 'Postmark',
+                        'mailgun.org': 'Mailgun',
+                        'email.freshservice.com': 'Freshservice',
+                        'spf.mandrillapp.com': 'Mandrill',
+                        'zoho.com': 'Zoho',
+                        'smtp.com': 'SMTP.com',
+                        'bluehost.com': 'Bluehost',
+                        'godaddy.com': 'GoDaddy',
+                        'hostgator.com': 'HostGator',
+                        'secureserver.net': 'GoDaddy',
+                        'wix.com': 'Wix',
+                        'squarespace.com': 'Squarespace',
+                        'shopify.com': 'Shopify',
+                        'emailsrvr.com': 'Rackspace',
+                        'brevo.com': 'Brevo',
+                        'sendinblue.com': 'Brevo',
+                        'klaviyo.com': 'Klaviyo',
+                        'cmail20.com': 'Campaign Monitor',
+                        'createsend.com': 'Campaign Monitor'
+                    };
+                    
+                    // Mechanisms that require DNS lookups
+                    const dnsLookupMechanisms = ['include', 'a', 'mx', 'ptr', 'exists', 'redirect'];
+                    
+                    for (const part of parts) {
+                        if (part.toLowerCase() === 'v=spf1') {
+                            mechanisms.push({ type: 'version', raw: part, description: 'SPF version identifier' });
+                            continue;
+                        }
+                        
+                        // Parse qualifier
+                        let qualifier = '+'; // default pass
+                        let mechanism = part;
+                        if (/^[+\-~?]/.test(part)) {
+                            qualifier = part[0];
+                            mechanism = part.slice(1);
+                        }
+                        
+                        const qualifierDesc = { '+': 'Pass', '-': 'Fail', '~': 'SoftFail', '?': 'Neutral' };
+                        
+                        // Parse mechanism type and value
+                        const [mechType, ...valueParts] = mechanism.split(':');
+                        const value = valueParts.join(':');
+                        const lowerType = mechType.toLowerCase();
+                        
+                        let description = '';
+                        let provider = null;
+                        let isDnsLookup = false;
+                        
+                        switch (lowerType) {
+                            case 'all':
+                                hasAll = true;
+                                allQualifier = qualifier;
+                                description = qualifier === '-' ? 'Reject all other senders' :
+                                              qualifier === '~' ? 'Soft-fail all other senders' :
+                                              qualifier === '?' ? 'Neutral on all other senders' :
+                                              'Allow all senders (not recommended)';
+                                break;
+                            case 'include':
+                                isDnsLookup = true;
+                                dnsLookups++;
+                                // Check for known provider
+                                for (const [domain, name] of Object.entries(knownProviders)) {
+                                    if (value.includes(domain)) {
+                                        provider = name;
+                                        break;
+                                    }
+                                }
+                                description = provider ? `Include ${provider} SPF` : `Include SPF from ${value}`;
+                                break;
+                            case 'ip4':
+                                description = `Allow IPv4: ${value}`;
+                                break;
+                            case 'ip6':
+                                description = `Allow IPv6: ${value}`;
+                                break;
+                            case 'a':
+                                isDnsLookup = true;
+                                dnsLookups++;
+                                description = value ? `Allow A record of ${value}` : 'Allow domain A record';
+                                break;
+                            case 'mx':
+                                isDnsLookup = true;
+                                dnsLookups++;
+                                description = value ? `Allow MX servers of ${value}` : 'Allow domain MX servers';
+                                break;
+                            case 'ptr':
+                                isDnsLookup = true;
+                                dnsLookups++;
+                                warnings.push('PTR mechanism is deprecated and slow');
+                                description = 'Validate via reverse DNS (deprecated)';
+                                break;
+                            case 'exists':
+                                isDnsLookup = true;
+                                dnsLookups++;
+                                description = `Check if ${value} exists`;
+                                break;
+                            case 'redirect':
+                                isDnsLookup = true;
+                                dnsLookups++;
+                                description = `Redirect to ${value} SPF policy`;
+                                break;
+                            case 'exp':
+                                description = `Explanation domain: ${value}`;
+                                break;
+                            default:
+                                if (part.includes('=')) {
+                                    description = 'Modifier';
+                                } else {
+                                    errors.push(`Unknown mechanism: ${part}`);
+                                    description = 'Unknown';
+                                }
+                        }
+                        
+                        mechanisms.push({
+                            type: lowerType,
+                            raw: part,
+                            qualifier,
+                            qualifierDesc: qualifierDesc[qualifier],
+                            value,
+                            description,
+                            provider,
+                            isDnsLookup
+                        });
+                    }
+                    
+                    // Validation checks
+                    if (!parts[0]?.toLowerCase().startsWith('v=spf1')) {
+                        errors.push('SPF record must start with v=spf1');
+                    }
+                    
+                    if (!hasAll) {
+                        warnings.push('Missing "all" mechanism - record should end with -all, ~all, or ?all');
+                    } else if (allQualifier === '+') {
+                        errors.push('+all allows anyone to send email as your domain');
+                    }
+                    
+                    if (dnsLookups > 10) {
+                        errors.push(`Too many DNS lookups (${dnsLookups}/10) - SPF will fail`);
+                    } else if (dnsLookups > 8) {
+                        warnings.push(`High DNS lookup count (${dnsLookups}/10) - close to limit`);
+                    }
+                    
+                    if (raw.length > 255) {
+                        warnings.push(`Record length (${raw.length} chars) exceeds 255 - requires multiple strings`);
+                    }
+                    
+                    // Check for duplicates
+                    const seen = new Set();
+                    for (const m of mechanisms) {
+                        if (m.type === 'include' && m.value) {
+                            if (seen.has(m.value)) {
+                                warnings.push(`Duplicate include: ${m.value}`);
+                            }
+                            seen.add(m.value);
+                        }
+                    }
+                    
+                    return {
+                        raw,
+                        mechanisms,
+                        dnsLookups,
+                        errors,
+                        warnings,
+                        isValid: errors.length === 0,
+                        hasWarnings: warnings.length > 0
+                    };
                 }
             },
             mounted() {
@@ -1282,6 +1976,9 @@
             methods: {
                 getUrl(params) {
                     return (this.localMode ? 'http://127.0.0.1:8989/' : '') + '?' + params;
+                },
+                getHostFromUrl(url) {
+                    try { return new URL(url).hostname; } catch { return url; }
                 },
                 resetView() { this.response = { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} }; this.domain = ""; this.domainVersions = []; },
                 toggleTheme() {
@@ -1606,6 +2303,7 @@
                     fetch(this.getUrl('action=check_status'))
                         .then(r => r.json())
                         .then(data => {
+                            this.bridgeConnected = true;
                             this.bridgeHasDb = data.has_db;
                             this.serverVersion = data.plugin_version || null;
                             if (data.has_db) {
@@ -1630,6 +2328,7 @@
                             });
                         })
                         .catch(e => {
+                            this.bridgeConnected = false;
                             this.pendingDeepLink = null;
                         });
                 },
@@ -1648,8 +2347,12 @@
                 loadHistory(append = false) {
                     if (this.bridgeHasDb) {
                         const offset = append ? this.historyItems.length : 0;
-                        const searchParam = this.historySearch ? `&search=${encodeURIComponent(this.historySearch)}` : '';
-                        return fetch(this.getUrl(`action=get_history&offset=${offset}${searchParam}`))
+                        let params = `action=get_history&offset=${offset}`;
+                        if (this.historySearch) params += `&search=${encodeURIComponent(this.historySearch)}`;
+                        if (this.historyFilters.existence !== 'all') params += `&existence=${this.historyFilters.existence}`;
+                        if (this.historyFilters.platform !== 'all') params += `&platform=${encodeURIComponent(this.historyFilters.platform)}`;
+                        if (this.historyFilters.scanCount !== 'all') params += `&scan_count=${encodeURIComponent(this.historyFilters.scanCount)}`;
+                        return fetch(this.getUrl(params))
                             .then(r => r.json())
                             .then(data => {
                                 if (append) {
@@ -1666,11 +2369,144 @@
                             if (this.historySearch) {
                                 items = items.filter(i => i.domain.toLowerCase().includes(this.historySearch.toLowerCase()));
                             }
+                            // Apply existence filter
+                            if (this.historyFilters.existence === 'exists') {
+                                items = items.filter(i => i.data && i.data.domain_exists !== false);
+                            } else if (this.historyFilters.existence === 'nonexistent') {
+                                items = items.filter(i => i.data && i.data.domain_exists === false);
+                            }
+                            // Apply platform filter
+                            if (this.historyFilters.platform !== 'all') {
+                                items = items.filter(i => i.data && i.data.cms && i.data.cms.name === this.historyFilters.platform);
+                            }
+                            // Apply scan count filter (group by domain first)
+                            if (this.historyFilters.scanCount !== 'all') {
+                                const domainCounts = {};
+                                items.forEach(i => { domainCounts[i.domain] = (domainCounts[i.domain] || 0) + 1; });
+                                const filterValue = this.historyFilters.scanCount;
+                                items = items.filter(i => {
+                                    const count = domainCounts[i.domain];
+                                    return this.matchesScanCountFilter(count, filterValue);
+                                });
+                            }
                             this.historyItems = items;
                             this.historyTotal = items.length;
                         }
                         return Promise.resolve();
                     }
+                },
+                loadAvailablePlatforms() {
+                    if (this.bridgeHasDb) {
+                        fetch(this.getUrl('action=get_platforms'))
+                            .then(r => r.json())
+                            .then(data => { this.availablePlatforms = data; });
+                    } else {
+                        const stored = localStorage.getItem('periscope_history');
+                        if (stored) {
+                            const items = JSON.parse(stored);
+                            const platforms = new Set();
+                            items.forEach(i => {
+                                if (i.data && i.data.cms && i.data.cms.name) {
+                                    platforms.add(i.data.cms.name);
+                                }
+                            });
+                            this.availablePlatforms = [...platforms].sort();
+                        }
+                    }
+                },
+                loadScanCountOptions() {
+                    if (this.bridgeHasDb) {
+                        fetch(this.getUrl('action=get_scan_counts'))
+                            .then(r => r.json())
+                            .then(data => { this.scanCountOptions = data; });
+                    } else {
+                        const stored = localStorage.getItem('periscope_history');
+                        if (stored) {
+                            const items = JSON.parse(stored);
+                            const domainCounts = {};
+                            items.forEach(i => { domainCounts[i.domain] = (domainCounts[i.domain] || 0) + 1; });
+                            this.scanCountOptions = this.buildScanCountOptions(Object.values(domainCounts));
+                        }
+                    }
+                },
+                buildScanCountOptions(counts) {
+                    if (!counts.length) return [];
+                    const distribution = {};
+                    counts.forEach(c => { distribution[c] = (distribution[c] || 0) + 1; });
+                    const uniqueCounts = Object.keys(distribution).map(Number).sort((a, b) => a - b);
+                    const options = [];
+                    
+                    // If only a few unique counts, show each individually
+                    if (uniqueCounts.length <= 5) {
+                        uniqueCounts.forEach(count => {
+                            const domains = distribution[count];
+                            options.push({
+                                value: String(count),
+                                label: `${count} scan${count > 1 ? 's' : ''} (${domains} domain${domains > 1 ? 's' : ''})`
+                            });
+                        });
+                    } else {
+                        // Build smart ranges based on distribution
+                        const max = Math.max(...uniqueCounts);
+                        const ranges = [];
+                        
+                        // Always include "1 scan" if it exists
+                        if (distribution[1]) {
+                            ranges.push({ min: 1, max: 1, label: '1 scan' });
+                        }
+                        
+                        // Group remaining into ranges
+                        if (max >= 2) {
+                            const mid = Math.min(5, Math.floor(max / 2));
+                            if (mid > 1) {
+                                ranges.push({ min: 2, max: mid, label: `2-${mid} scans` });
+                            }
+                            if (max > mid) {
+                                ranges.push({ min: mid + 1, max: max, label: `${mid + 1}+ scans` });
+                            }
+                        }
+                        
+                        ranges.forEach(range => {
+                            let domainCount = 0;
+                            for (let i = range.min; i <= (range.max === max ? max : range.max); i++) {
+                                domainCount += distribution[i] || 0;
+                            }
+                            if (domainCount > 0) {
+                                options.push({
+                                    value: range.min === range.max ? String(range.min) : `${range.min}-${range.max}`,
+                                    label: `${range.label} (${domainCount} domain${domainCount > 1 ? 's' : ''})`
+                                });
+                            }
+                        });
+                    }
+                    return options;
+                },
+                matchesScanCountFilter(count, filterValue) {
+                    // Handle exact match (e.g., "1", "2", "3")
+                    if (/^\d+$/.test(filterValue)) {
+                        return count === parseInt(filterValue);
+                    }
+                    // Handle range (e.g., "2-5")
+                    const rangeMatch = filterValue.match(/^(\d+)-(\d+)$/);
+                    if (rangeMatch) {
+                        const min = parseInt(rangeMatch[1]);
+                        const max = parseInt(rangeMatch[2]);
+                        return count >= min && count <= max;
+                    }
+                    // Handle open-ended range (e.g., "6+")
+                    const plusMatch = filterValue.match(/^(\d+)\+$/);
+                    if (plusMatch) {
+                        return count >= parseInt(plusMatch[1]);
+                    }
+                    return true;
+                },
+                applyHistoryFilters() {
+                    this.selectedHistoryIndex = -1;
+                    this.loadHistory(false);
+                },
+                clearHistoryFilters() {
+                    this.historyFilters = { existence: 'all', platform: 'all', scanCount: 'all' };
+                    this.loadHistory(false);
                 },
                 searchHistory() {
                     this.selectedHistoryIndex = -1;
@@ -1702,10 +2538,12 @@
                     if (this.bridgeHasDb && item.id) {
                         this.loading = true;
                         this.loadingText = "Loading...";
+                        this.loadingFromHistory = true;
                         // Clear current response while loading
                         this.response = { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} };
                         fetch(this.getUrl(`action=get_history_item&id=${item.id}`)).then(r => r.json()).then(data => { 
-                            this.loading = false; 
+                            this.loading = false;
+                            this.loadingFromHistory = false;
                             this.finishLoad(item, data); 
                             
                             // Check if cache was regenerated or needs regeneration
