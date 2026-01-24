@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.0] - 2026-01-24
+
+### Added
+
+- **Email Health Grading** - Automatic scoring (A-F) of email infrastructure security. Analyzes MX redundancy, SPF strictness, DKIM presence, and DMARC policies with actionable recommendations.
+- **SPF Visualizer** - Deep analysis of Sender Policy Framework records. Breaks down mechanisms, identifies third-party providers, checks qualifiers, and counts DNS lookups against the RFC limit of 10.
+- **Reverse DNS Verification** - Performs Forward-Confirmed Reverse DNS (FCrDNS) checks on resolved IP addresses to validate server identity (PTR record matching).
+- **Advanced History Filtering** - Filter the scan log by Domain Existence, detected Platform (CMS), and Scan Frequency.
+- **Expanded DKIM Detection** - Added signatures for 50+ major email providers including Google Workspace, Microsoft 365, SendGrid, Mailchimp, Postmark, and Zendesk.
+
+### Changed
+
+- **Engine Architecture** - Unified the DNS lookup logic into a single robust pipeline for both CLI and Web interfaces, improving consistency.
+- **Cache System** - Implemented background cache regeneration to seamlessly upgrade legacy scan data to the latest format without blocking the UI.
+
 ## [1.2.0] - 2026-01-22
 
 ### Added

@@ -135,7 +135,7 @@ error_reporting(E_ERROR | E_PARSE);
 ini_set('display_errors', '0');
 
 // --- PLUGIN VERSION ---
-define('PERISCOPE_VERSION', '1.2');
+define('PERISCOPE_VERSION', '1.3');
 
 // --- AUTOLOADER ---
 spl_autoload_register(function ($class) {
