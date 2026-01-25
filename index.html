@@ -302,6 +302,11 @@
                         class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-colors border border-cyan-200 dark:border-cyan-800/50">
                         <span class="mdi mdi-history mr-1"></span> {{ otherVersions.length }} other scans
                     </button>
+                    <button v-if="localMode && response.raw_available" @click="exportReport()"
+                        class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors border border-slate-200 dark:border-slate-700"
+                        title="Export as HTML report">
+                        <span class="mdi mdi-file-export-outline mr-1"></span> Export
+                    </button>
                 </div>
 
                 <!-- Subdomain indicator -->
@@ -2884,6 +2889,10 @@
                     }
                 },
                 exportHistory() { window.location.href = this.getUrl('action=export_history'); },
+                exportReport() {
+                    if (!this.response.target_host || !this.response.timestamp) return;
+                    window.location.href = this.getUrl(`action=export_report&domain=${encodeURIComponent(this.response.target_host)}&timestamp=${this.response.timestamp}`);
+                },
                 triggerImport() { this.$refs.importFile.click(); },
                 importHistory(e) {
                     const file = e.target.files[0]; if (!file) return;

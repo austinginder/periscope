@@ -2852,6 +2852,861 @@ if ($pdo) {
         echo json_encode(['success' => true, 'data' => $data]);
         exit;
     }
+    
+    if ($action === 'export_report') {
+        $domain = $_GET['domain'] ?? '';
+        $timestamp = $_GET['timestamp'] ?? '';
+        if (!$domain || !$timestamp) {
+            echo json_encode(['error' => 'Missing domain or timestamp']);
+            exit;
+        }
+        
+        $path = getScanPath($domain, $timestamp);
+        $cache = loadResponseCache($path);
+        $raw = loadRawFiles($path);
+        if (!$cache) {
+            $data = computeFromRaw($raw, $domain, $timestamp, false);
+        } else {
+            $data = $cache['data'] ?? $cache;
+        }
+        $data['timestamp'] = (int)$timestamp;
+        
+        // Embed raw files for preview
+        $rawFiles = [];
+        if (!empty($raw['robots_txt'])) $rawFiles['robots_txt'] = $raw['robots_txt'];
+        if (!empty($raw['sitemap_xml'])) $rawFiles['sitemap_xml'] = substr($raw['sitemap_xml'], 0, 50000);
+        if (!empty($raw['security_txt'])) $rawFiles['security_txt'] = $raw['security_txt'];
+        if (!empty($raw['ads_txt'])) $rawFiles['ads_txt'] = $raw['ads_txt'];
+        if (!empty($raw['humans_txt'])) $rawFiles['humans_txt'] = $raw['humans_txt'];
+        if (!empty($raw['manifest'])) $rawFiles['manifest'] = $raw['manifest'];
+        if (!empty($raw['whois_domain'])) $rawFiles['whois_domain'] = $raw['whois_domain'];
+        
+        // Helper to get MIME type from extension
+        $getMimeType = function($ext) {
+            $mimes = ['png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp', 'ico' => 'image/x-icon', 'svg' => 'image/svg+xml'];
+            return $mimes[strtolower($ext)] ?? 'image/png';
+        };
+
+        // Get favicon as base64 (prefer hash-based storage for better format support)
+        $faviconBase64 = '';
+        if (!empty($data['metadata']['favicon']['hash'])) {
+            $fav = $data['metadata']['favicon'];
+            $favPath = getFilesPath($domain) . '/' . $fav['hash'] . '.' . ($fav['extension'] ?? 'ico');
+            if (file_exists($favPath)) {
+                $faviconBase64 = 'data:' . $getMimeType($fav['extension'] ?? 'ico') . ';base64,' . base64_encode(file_get_contents($favPath));
+            }
+        }
+        if (!$faviconBase64) {
+            $faviconPath = "$path/favicon.ico";
+            if (file_exists($faviconPath)) {
+                $faviconBase64 = 'data:image/x-icon;base64,' . base64_encode(file_get_contents($faviconPath));
+            }
+        }
+
+        // Get OG image as base64
+        $ogImageBase64 = '';
+        if (!empty($data['metadata']['meta_tags']['open_graph']['image_hash'])) {
+            $og = $data['metadata']['meta_tags']['open_graph'];
+            $ogPath = getFilesPath($domain) . '/' . $og['image_hash'] . '.' . ($og['image_extension'] ?? 'png');
+            if (file_exists($ogPath)) {
+                $ogImageBase64 = 'data:' . $getMimeType($og['image_extension'] ?? 'png') . ';base64,' . base64_encode(file_get_contents($ogPath));
+            }
+        }
+
+        // Get Twitter image as base64 (fall back to OG image if Twitter has no separate image)
+        $twitterImageBase64 = '';
+        if (!empty($data['metadata']['meta_tags']['twitter']['image_hash'])) {
+            $tw = $data['metadata']['meta_tags']['twitter'];
+            $twPath = getFilesPath($domain) . '/' . $tw['image_hash'] . '.' . ($tw['image_extension'] ?? 'png');
+            if (file_exists($twPath)) {
+                $twitterImageBase64 = 'data:' . $getMimeType($tw['image_extension'] ?? 'png') . ';base64,' . base64_encode(file_get_contents($twPath));
+            }
+        }
+        // Fall back to OG image if Twitter Card exists but has no separate image (Twitter uses OG as fallback)
+        if (!$twitterImageBase64 && !empty($data['metadata']['meta_tags']['twitter']) && $ogImageBase64) {
+            $twitterImageBase64 = $ogImageBase64;
+        }
+
+        // Get logo as base64
+        $logoBase64 = '';
+        $logoPath = __DIR__ . '/Periscope.webp';
+        if (file_exists($logoPath)) {
+            $logoBase64 = 'data:image/webp;base64,' . base64_encode(file_get_contents($logoPath));
+        }
+        
+        $scanDate = date('M j, Y \a\t g:i A', $timestamp);
+        $exportDate = date('M j, Y');
+        $jsonData = json_encode($data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $rawFilesJson = json_encode($rawFiles, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        
+        header('Content-Type: text/html; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $domain . '-report-' . date('Y-m-d', $timestamp) . '.html"');
+        
+        echo '<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Periscope Report: ' . htmlspecialchars($domain) . '</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+    darkMode: "class",
+    theme: {
+        extend: {
+            fontFamily: { sans: ["Inter", "sans-serif"], mono: ["JetBrains Mono", "monospace"] },
+            colors: { slate: { 850: "#1e293b", 950: "#020617" }, cyan: { 400: "#22d3ee", 500: "#06b6d4" } }
+        }
+    }
+}
+</script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-200 font-sans">
+<nav class="sticky top-0 z-40 w-full backdrop-blur-lg bg-slate-950/70 border-b border-slate-800/50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-16">
+            <div class="flex items-center gap-3">
+                ' . ($logoBase64 ? '<img src="' . $logoBase64 . '" alt="Periscope" class="h-8 w-8 object-contain">' : '') . '
+                <span class="font-bold text-lg tracking-tight text-cyan-50">Periscope</span>
+                <span class="bg-cyan-900/30 text-cyan-300 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold border border-cyan-800/50">Report</span>
+            </div>
+            <div class="text-sm text-slate-400">
+                <span class="mdi mdi-clock-outline mr-1"></span>' . $scanDate . '
+            </div>
+        </div>
+    </div>
+</nav>
+
+<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="mb-6 flex justify-center items-center gap-4">
+        <h1 class="text-2xl font-bold text-white flex items-center gap-2">
+            ' . ($faviconBase64 ? '<img src="' . $faviconBase64 . '" class="w-6 h-6">' : '') . '
+            ' . htmlspecialchars($domain) . '
+        </h1>
+    </div>
+    <div id="report"></div>
+</main>
+
+<footer class="border-t border-slate-800 mt-12 py-6 text-center text-slate-500 text-sm">
+    Generated by <a href="https://periscope.run" class="text-cyan-400 hover:underline">Periscope</a> v' . PERISCOPE_VERSION . '
+</footer>
+
+<script>
+const data = ' . $jsonData . ';
+const rawFiles = ' . $rawFilesJson . ';
+const faviconBase64 = ' . json_encode($faviconBase64) . ';
+const ogImageBase64 = ' . json_encode($ogImageBase64) . ';
+const twitterImageBase64 = ' . json_encode($twitterImageBase64) . ';
+let activeModal = null;
+
+function showRawModal(title, content) {
+    if (activeModal) activeModal.remove();
+    const modal = document.createElement("div");
+    modal.className = "fixed inset-0 z-50 overflow-y-auto";
+    modal.innerHTML = `<div class="flex items-center justify-center min-h-screen px-4 py-8">
+        <div class="fixed inset-0 bg-slate-900/80" onclick="closeModal()"></div>
+        <div class="relative bg-slate-900 rounded-xl border border-slate-700 shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-950">
+                <h3 class="text-lg font-medium text-white">${title}</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white"><span class="mdi mdi-close text-xl"></span></button>
+            </div>
+            <div class="p-6 overflow-auto max-h-[60vh]">
+                <pre class="text-xs font-mono text-slate-300 whitespace-pre-wrap break-all">${esc(content)}</pre>
+            </div>
+        </div>
+    </div>`;
+    document.body.appendChild(modal);
+    activeModal = modal;
+}
+function closeModal() { if (activeModal) { activeModal.remove(); activeModal = null; } }
+
+function getSpfAnalysis(records) {
+    if (!records) return null;
+    const spfRecord = records.find(r => r.type === "TXT" && r.value.replace(/^["\']|["\']$/g, "").trim().toLowerCase().startsWith("v=spf1"));
+    if (!spfRecord) return null;
+    const raw = spfRecord.value.replace(/^["\']|["\']$/g, "").trim();
+    const parts = raw.split(/\s+/);
+    const mechanisms = [];
+    const errors = [];
+    const warnings = [];
+    let dnsLookups = 0;
+    let hasAll = false;
+    let allQualifier = "";
+    
+    const providers = {
+        "_spf.google.com": "Google Workspace", "googlemail.com": "Google Workspace",
+        "spf.protection.outlook.com": "Microsoft 365", "sendgrid.net": "SendGrid",
+        "mailgun.org": "Mailgun", "amazonses.com": "Amazon SES", "mailchimp.com": "Mailchimp",
+        "servers.mcsv.net": "Mailchimp", "spf.mandrillapp.com": "Mandrill", "zendesk.com": "Zendesk",
+        "shopify.com": "Shopify", "squarespace.com": "Squarespace", "wix.com": "Wix",
+        "zoho.com": "Zoho", "postmarkapp.com": "Postmark", "helpscoutemail.com": "Help Scout",
+        "freshdesk.com": "Freshdesk", "hubspot.com": "HubSpot", "intercom.io": "Intercom",
+        "klaviyo.com": "Klaviyo"
+    };
+
+    parts.forEach(part => {
+        if (part.toLowerCase() === "v=spf1") {
+            mechanisms.push({type: "version", raw: part, description: "SPF version"});
+            return;
+        }
+        let qualifier = "+";
+        let mech = part;
+        if (/^[+\-~?]/.test(part)) { qualifier = part[0]; mech = part.slice(1); }
+        const qualifierDesc = {"+": "Pass", "-": "Fail", "~": "SoftFail", "?": "Neutral"}[qualifier];
+        
+        const [type, ...valParts] = mech.split(":");
+        const val = valParts.join(":");
+        const lowerType = type.toLowerCase();
+        
+        let desc = "";
+        let provider = null;
+        let isDns = false;
+        
+        if (lowerType === "all") {
+            hasAll = true; allQualifier = qualifier;
+            desc = qualifier === "-" ? "Reject others" : qualifier === "~" ? "Soft-fail others" : "Allow others";
+        } else if (lowerType === "include") {
+            isDns = true; dnsLookups++;
+            for(const [d,n] of Object.entries(providers)) { if(val.includes(d)) provider = n; }
+            desc = provider ? `Include ${provider}` : `Include ${val}`;
+        } else if (lowerType === "ip4") {
+            desc = `IPv4: ${val}`;
+        } else if (lowerType === "ip6") {
+            desc = `IPv6: ${val}`;
+        } else if (lowerType === "a" || lowerType === "mx") {
+            isDns = true; dnsLookups++;
+            desc = `Allow ${lowerType.toUpperCase()} of ${val || "domain"}`;
+        } else if (lowerType === "redirect") {
+            isDns = true; dnsLookups++;
+            desc = `Redirect to ${val}`;
+        } else if (lowerType === "ptr") {
+            isDns = true; dnsLookups++;
+            desc = "Reverse DNS (deprecated)";
+            warnings.push("PTR is deprecated");
+        } else if (lowerType === "exists") {
+            isDns = true; dnsLookups++;
+            desc = `Check if ${val} exists`;
+        }
+        
+        mechanisms.push({type: lowerType, raw: part, qualifier, qualifierDesc, value: val, description: desc, provider, isDns});
+    });
+
+    if (dnsLookups > 10) errors.push(`Too many lookups (${dnsLookups}/10)`);
+    if (!hasAll) warnings.push("Missing \'all\' mechanism");
+    else if (allQualifier === "+") errors.push("+all allows everyone");
+    
+    return { mechanisms, dnsLookups, errors, warnings, isValid: errors.length === 0, hasWarnings: warnings.length > 0 };
+}
+
+function getEmailHealth(records) {
+    if (!records) return null;
+    const mx = records.filter(r => r.type === "MX");
+    if (!mx.length) return null;
+    
+    const res = { 
+        mxCount: mx.length, 
+        score: 10, 
+        spf: {present:false, score:0, items:[], details:[]}, 
+        dkim: {present:false, score:0, items:[], details:[]}, 
+        dmarc: {present:false, score:0, items:[], details:[]}, 
+        recommendations: [] 
+    };
+    
+    // SPF
+    const spf = records.find(r => r.type === "TXT" && r.value.toLowerCase().includes("v=spf1"));
+    if (spf) {
+        res.spf.present = true;
+        res.spf.score = 10;
+        res.spf.items.push("Present");
+        res.spf.details.push("SPF record found");
+        
+        const analysis = getSpfAnalysis(records);
+        if (analysis && analysis.isValid) { 
+            res.spf.score += 10; 
+            res.spf.items.push("Valid"); 
+            res.spf.details.push("Valid syntax");
+        }
+
+        const val = spf.value.toLowerCase();
+        if (val.includes("-all")) { 
+            res.spf.score += 5; 
+            res.spf.items.push("Hard fail"); 
+            res.spf.details.push("Hard fail (-all)");
+        } else if (val.includes("~all")) { 
+            res.spf.score += 5; 
+            res.spf.items.push("Soft fail"); 
+            res.spf.details.push("Soft fail (~all)");
+        } else {
+            res.recommendations.push("Upgrade SPF policy to use -all or ~all for stricter enforcement");
+        }
+    } else {
+        res.recommendations.push("Add an SPF record to authorize email senders");
+    }
+    res.score += res.spf.score;
+
+    // DKIM
+    const dkim = records.filter(r => r.type === "TXT" && r.name.includes("._domainkey"));
+    if (dkim.length > 0) {
+        res.dkim.present = true;
+        res.dkim.score = Math.min(30, 15 + (dkim.length - 1) * 5);
+        res.dkim.items.push(`${dkim.length} selectors`);
+        const selectors = dkim.map(r => {
+            const m = r.name.match(/^([^.]+)\._domainkey/);
+            return m ? m[1] : r.name.split("._domainkey")[0];
+        });
+        res.dkim.details.push(`Selectors: ${selectors.join(", ")}`);
+    } else {
+        res.recommendations.push("Add DKIM records to cryptographically sign outgoing emails");
+    }
+    res.score += res.dkim.score;
+
+    // DMARC
+    const dmarc = records.find(r => r.type === "TXT" && r.name.startsWith("_dmarc"));
+    if (dmarc) {
+        res.dmarc.present = true;
+        res.dmarc.score = 10;
+        res.dmarc.items.push("Present");
+        res.dmarc.details.push("DMARC found");
+
+        const val = dmarc.value.toLowerCase();
+        if (val.includes("v=dmarc1") && val.includes("p=")) {
+            res.dmarc.score += 5; // Valid syntax bonus
+        }
+
+        if (val.includes("p=reject")) { 
+            res.dmarc.score += 20; 
+            res.dmarc.items.push("Reject"); 
+            res.dmarc.details.push("Policy: reject");
+        } else if (val.includes("p=quarantine")) { 
+            res.dmarc.score += 15; 
+            res.dmarc.items.push("Quarantine"); 
+            res.dmarc.details.push("Policy: quarantine");
+            res.recommendations.push("Consider upgrading DMARC policy from quarantine to reject for maximum protection");
+        } else { 
+            res.dmarc.score += 5; 
+            res.dmarc.items.push("None"); 
+            res.dmarc.details.push("Policy: none");
+            res.recommendations.push("Upgrade DMARC policy from none to quarantine or reject");
+        }
+    } else {
+        res.recommendations.push("Add a DMARC record to protect against email spoofing");
+    }
+    res.score += res.dmarc.score;
+
+    if (res.score >= 90) res.grade = "A";
+    else if (res.score >= 75) res.grade = "B";
+    else if (res.score >= 60) res.grade = "C";
+    else if (res.score >= 40) res.grade = "D";
+    else res.grade = "F";
+
+    return res;
+}
+
+function showImageModal(title, imageSrc) {
+    if (activeModal) activeModal.remove();
+    const modal = document.createElement("div");
+    modal.className = "fixed inset-0 z-50 overflow-y-auto";
+    modal.innerHTML = `<div class="flex items-center justify-center min-h-screen px-4 py-8">
+        <div class="fixed inset-0 bg-slate-900/80" onclick="closeModal()"></div>
+        <div class="relative bg-slate-900 rounded-xl border border-slate-700 shadow-2xl max-w-4xl w-full overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-950">
+                <h3 class="text-lg font-medium text-white">${title}</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white"><span class="mdi mdi-close text-xl"></span></button>
+            </div>
+            <div class="p-6 flex justify-center bg-slate-950/50">
+                <img src="${imageSrc}" alt="${title}" class="max-w-full max-h-[60vh] rounded-lg shadow-lg">
+            </div>
+        </div>
+    </div>`;
+    document.body.appendChild(modal);
+    activeModal = modal;
+}
+
+function showMetaModal(type) {
+    if (activeModal) activeModal.remove();
+    const isOg = type === "og";
+    const meta = isOg ? data.metadata.meta_tags.open_graph : data.metadata.meta_tags.twitter;
+    const imgSrc = isOg ? ogImageBase64 : twitterImageBase64;
+    const title = isOg ? "Open Graph Preview" : "Twitter Card Preview";
+    const cardTitle = meta.title || (isOg ? (data.metadata.meta_tags.basic?.title) : (data.metadata.meta_tags.open_graph?.title || data.metadata.meta_tags.basic?.title)) || "No title";
+    
+    let imageHtml = "";
+    if (imgSrc) {
+        imageHtml = `<div class="aspect-[1.91/1] bg-slate-900 overflow-hidden border-b border-slate-700"><img src="${imgSrc}" class="w-full h-full object-cover"></div>`;
+    } else {
+        imageHtml = `<div class="aspect-[1.91/1] bg-slate-900 flex items-center justify-center border-b border-slate-700"><span class="mdi mdi-image-off text-4xl text-slate-700"></span></div>`;
+    }
+
+    let detailsHtml = "";
+    if (isOg) {
+        if (meta.type) detailsHtml += `<div class="flex justify-between"><span class="text-slate-500">og:type</span><span class="font-mono text-slate-300">${esc(meta.type)}</span></div>`;
+        if (meta.image) detailsHtml += `<div class="flex justify-between gap-2"><span class="text-slate-500 shrink-0">og:image</span><span class="font-mono text-slate-300 truncate text-right">${esc(meta.image)}</span></div>`;
+    } else {
+        if (meta.card) detailsHtml += `<div class="flex justify-between"><span class="text-slate-500">twitter:card</span><span class="font-mono text-slate-300">${esc(meta.card)}</span></div>`;
+        if (meta.site) detailsHtml += `<div class="flex justify-between"><span class="text-slate-500">twitter:site</span><span class="font-mono text-slate-300">${esc(meta.site)}</span></div>`;
+    }
+
+    const modal = document.createElement("div");
+    modal.className = "fixed inset-0 z-50 overflow-y-auto";
+    modal.innerHTML = `<div class="flex items-center justify-center min-h-screen px-4 py-8">
+        <div class="fixed inset-0 bg-slate-900/80" onclick="closeModal()"></div>
+        <div class="relative bg-slate-900 rounded-xl border border-slate-700 shadow-2xl max-w-lg w-full overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-950">
+                <h3 class="text-lg font-medium text-white">${title}</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white"><span class="mdi mdi-close text-xl"></span></button>
+            </div>
+            <div class="p-6">
+                <div class="border border-slate-700 rounded-lg overflow-hidden bg-slate-800 shadow-sm mb-4">
+                    ${imageHtml}
+                    <div class="p-4">
+                        <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">${esc(data.target_host)}</p>
+                        <h4 class="font-semibold text-white text-base leading-tight mb-1">${esc(cardTitle)}</h4>
+                        ${meta.description ? `<p class="text-sm text-slate-400 line-clamp-2">${esc(meta.description)}</p>` : ""}
+                    </div>
+                </div>
+                <div class="space-y-2 text-xs">
+                    ${detailsHtml}
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    activeModal = modal;
+}
+
+function render() {
+    const r = document.getElementById("report");
+    let html = "";
+    
+    // Subdomain indicator
+    if (data.is_subdomain) {
+        html += `<div class="mb-6 flex justify-center">
+            <div class="inline-flex items-center gap-3 px-4 py-2 rounded-lg bg-indigo-900/20 border border-indigo-800/50 text-sm">
+                <span class="text-indigo-400"><span class="mdi mdi-subdirectory-arrow-right mr-1"></span> Scanning subdomain</span>
+                <span class="font-mono font-medium text-indigo-300">${esc(data.target_host)}</span>
+                <span class="text-indigo-500">of</span>
+                <span class="font-mono text-indigo-400">${esc(data.root_domain)}</span>
+            </div>
+        </div>`;
+    }
+    
+    // Redirect chain
+    if (data.redirect_chain && data.redirect_chain.length > 1) {
+        html += `<div class="mb-6 flex justify-center">
+            <div class="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm bg-amber-900/20 border border-amber-800/50">
+                <span class="text-amber-400 font-medium"><span class="mdi mdi-redirect mr-1"></span> Redirect</span>`;
+        data.redirect_chain.forEach((hop, i) => {
+            const statusClass = hop.status_code === 200 ? "bg-emerald-900/40 text-emerald-400" : 
+                               hop.status_code === 301 || hop.status_code === 308 ? "bg-cyan-900/40 text-cyan-400" :
+                               hop.status_code >= 400 ? "bg-red-900/40 text-red-400" : "bg-amber-900/40 text-amber-400";
+            html += `<span class="flex items-center gap-1">
+                <span class="font-mono text-xs text-amber-300 max-w-[200px] truncate" title="${esc(hop.url)}">${esc(new URL(hop.url).hostname)}</span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${statusClass}">${hop.status_code}</span>
+            </span>`;
+            if (i < data.redirect_chain.length - 1) html += `<span class="text-amber-600 mdi mdi-arrow-right"></span>`;
+        });
+        html += `</div></div>`;
+    }
+    
+    // Search engine blocking warning
+    if (data.indexability && data.indexability.blocked) {
+        const reasons = data.indexability.reasons ? data.indexability.reasons.map(r => r.detail).join(", ") : "";
+        html += `<div class="mb-6 flex justify-center">
+            <div class="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm bg-red-900/20 border border-red-800/50">
+                <span class="text-red-400 font-medium"><span class="mdi mdi-eye-off mr-1"></span> Hidden from Search Engines</span>
+                <span class="text-red-400 text-xs">(${esc(reasons)})</span>
+            </div>
+        </div>`;
+    }
+    
+    // Top cards row - SSL, Platform, Infrastructure
+    html += `<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">`;
+    
+    // SSL Certificate
+    if (data.ssl && data.ssl.valid) {
+        const s = data.ssl;
+        const colorClass = s.days_remaining < 14 ? "text-red-400" : s.days_remaining < 30 ? "text-amber-400" : "text-emerald-400";
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider"><span class="mdi mdi-lock mr-1"></span> SSL Certificate</h3>
+            </div>
+            <div class="p-5">
+                <div class="grid grid-cols-3 gap-4 text-sm">
+                    <div><p class="text-slate-400 mb-1">Expires</p><p class="font-mono text-slate-200">${esc(s.expires || s.valid_to || "N/A")}</p></div>
+                    <div><p class="text-slate-400 mb-1">Days Left</p><p class="font-mono text-lg font-bold ${colorClass}">${s.days_remaining}</p></div>
+                    <div><p class="text-slate-400 mb-1">Issuer</p><p class="font-mono text-slate-200 truncate" title="${esc(s.issuer)}">${esc(s.issuer || "N/A")}</p></div>
+                </div>
+            </div>
+        </div>`;
+    }
+    
+    // Platform
+    if (data.cms && data.cms.name) {
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider"><span class="mdi mdi-application-cog mr-1"></span> Platform</h3>
+            </div>
+            <div class="p-5 flex items-center justify-between">
+                <span class="text-lg font-medium text-slate-200">${esc(data.cms.name)}</span>
+                ${data.cms.version ? `<span class="font-mono text-sm px-3 py-1 rounded-lg bg-slate-800 text-slate-400">v${esc(data.cms.version)}</span>` : ""}
+            </div>
+        </div>`;
+    }
+    
+    // Infrastructure
+    if (data.infrastructure && (data.infrastructure.host || data.infrastructure.cdn || data.infrastructure.server)) {
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider"><span class="mdi mdi-server mr-1"></span> Infrastructure</h3>
+            </div>
+            <div class="p-5">
+                <div class="grid grid-cols-3 gap-4 text-sm">
+                    ${data.infrastructure.host ? `<div><p class="text-slate-400 mb-1">Host</p><p class="font-medium text-slate-200">${esc(data.infrastructure.host)}</p></div>` : ""}
+                    ${data.infrastructure.cdn ? `<div><p class="text-slate-400 mb-1">CDN</p><p class="font-medium text-slate-200">${esc(data.infrastructure.cdn)}</p></div>` : ""}
+                    ${data.infrastructure.server ? `<div><p class="text-slate-400 mb-1">Server</p><p class="font-mono text-slate-200">${esc(data.infrastructure.server)}</p></div>` : ""}
+                </div>
+            </div>
+        </div>`;
+    }
+    html += `</div>`;
+    
+    // Second row - Security, Technology, Metadata
+    html += `<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">`;
+    
+    // Security Headers
+    if (data.security && data.security.score) {
+        const sec = data.security;
+        const scoreClass = sec.score.value <= 2 ? "bg-red-900/30 text-red-400" : sec.score.value <= 4 ? "bg-amber-900/30 text-amber-400" : "bg-emerald-900/30 text-emerald-400";
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30 flex justify-between items-center">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider"><span class="mdi mdi-shield-check mr-1"></span> Security Headers</h3>
+                <span class="text-xs font-bold px-2 py-1 rounded-full ${scoreClass}">${sec.score.value}/${sec.score.total}</span>
+            </div>
+            <div class="p-4 space-y-2 text-xs">`;
+        const headers = [["hsts","HSTS"],["csp","CSP"],["x_frame_options","X-Frame-Options"],["x_content_type_options","X-Content-Type-Options"],["referrer_policy","Referrer-Policy"],["permissions_policy","Permissions-Policy"]];
+        headers.forEach(([k,n]) => {
+            if (sec[k]) {
+                const icon = sec[k].present ? `<span class="text-emerald-400 mdi mdi-check-circle"></span>` : `<span class="text-slate-600 mdi mdi-close-circle"></span>`;
+                html += `<div class="flex items-center justify-between"><span class="text-slate-400">${n}</span>${icon}</div>`;
+            }
+        });
+        html += `</div></div>`;
+    }
+    
+    // Technology
+    if (data.technology && (data.technology.frameworks?.length || data.technology.analytics?.length || data.technology.ecommerce?.length || data.technology.widgets?.length)) {
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider"><span class="mdi mdi-code-tags mr-1"></span> Technology</h3>
+            </div>
+            <div class="p-4 space-y-3 text-xs">`;
+        if (data.technology.frameworks?.length) {
+            html += `<div><p class="text-slate-400 mb-1 font-medium">Frameworks</p><div class="flex flex-wrap gap-1">`;
+            data.technology.frameworks.forEach(fw => { html += `<span class="px-2 py-0.5 bg-cyan-900/20 text-cyan-300 rounded">${esc(fw)}</span>`; });
+            html += `</div></div>`;
+        }
+        if (data.technology.analytics?.length) {
+            html += `<div><p class="text-slate-400 mb-1 font-medium">Analytics</p><div class="flex flex-wrap gap-1">`;
+            data.technology.analytics.forEach(a => { html += `<span class="px-2 py-0.5 bg-purple-900/20 text-purple-300 rounded">${esc(a.name)}${a.id ? ` (${esc(a.id)})` : ""}</span>`; });
+            html += `</div></div>`;
+        }
+        if (data.technology.ecommerce?.length) {
+            html += `<div><p class="text-slate-400 mb-1 font-medium">E-commerce</p><div class="flex flex-wrap gap-1">`;
+            data.technology.ecommerce.forEach(ec => { html += `<span class="px-2 py-0.5 bg-emerald-900/20 text-emerald-300 rounded">${esc(ec)}</span>`; });
+            html += `</div></div>`;
+        }
+        if (data.technology.widgets?.length) {
+            html += `<div><p class="text-slate-400 mb-1 font-medium">Widgets</p><div class="flex flex-wrap gap-1">`;
+            data.technology.widgets.forEach(w => { html += `<span class="px-2 py-0.5 bg-amber-900/20 text-amber-300 rounded">${esc(w)}</span>`; });
+            html += `</div></div>`;
+        }
+        html += `</div></div>`;
+    }
+    
+    // Metadata with clickable previews
+    if (data.metadata && !Array.isArray(data.metadata)) {
+        const m = data.metadata;
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider"><span class="mdi mdi-file-document-outline mr-1"></span> Metadata</h3>
+            </div>
+            <div class="p-4 space-y-2 text-xs">`;
+        const metaItems = [
+            {key: "robots_txt", name: "robots.txt", rawKey: "robots_txt", present: m.robots_txt?.present, detail: m.robots_txt?.disallow_count ? `${m.robots_txt.disallow_count} rules` : null},
+            {key: "sitemap", name: "sitemap.xml", rawKey: "sitemap_xml", present: m.sitemap?.present, detail: m.sitemap?.url_count ? `${m.sitemap.url_count} URLs` : null},
+            {key: "security_txt", name: "security.txt", rawKey: "security_txt", present: m.security_txt?.present},
+            {key: "ads_txt", name: "ads.txt", rawKey: "ads_txt", present: m.ads_txt?.present, detail: m.ads_txt?.seller_count ? `${m.ads_txt.seller_count} sellers` : null},
+            {key: "humans_txt", name: "humans.txt", rawKey: "humans_txt", present: m.humans_txt?.present},
+            {key: "manifest", name: "manifest.json", rawKey: "manifest", present: m.manifest?.present, detail: m.manifest?.display},
+            {key: "favicon", name: "Favicon", present: m.favicon?.present},
+        ];
+        metaItems.forEach(item => {
+            if (item.present) {
+                const hasRaw = rawFiles[item.rawKey];
+                let actionBtn = "";
+                if (item.key === "favicon" && faviconBase64) {
+                    actionBtn = `<button onclick="showImageModal(\\\'Favicon\\\', faviconBase64)" class="text-cyan-400 hover:text-cyan-300 ml-2"><span class="mdi mdi-image-outline"></span></button>`;
+                } else if (hasRaw) {
+                    actionBtn = `<button onclick="showRawModal(\\\'${item.name}\\\', rawFiles.${item.rawKey})" class="text-cyan-400 hover:text-cyan-300 ml-2"><span class="mdi mdi-eye-outline"></span></button>`;
+                }
+                html += `<div class="flex items-center justify-between">
+                    <span class="flex items-center gap-1"><span class="text-slate-400">${esc(item.name)}</span>${actionBtn}</span>
+                    <span class="text-emerald-400"><span class="mdi mdi-check-circle"></span>${item.detail ? ` <span class="text-slate-500">(${esc(item.detail)})</span>` : ""}</span>
+                </div>`;
+            }
+        });
+        if (m.meta_tags?.open_graph) {
+            html += `<div class="flex items-center justify-between"><span class="flex items-center gap-1"><span class="text-slate-400">Open Graph</span><button onclick="showMetaModal(\\\'og\\\')" class="text-cyan-400 hover:text-cyan-300 ml-2"><span class="mdi mdi-image-outline"></span></button></span><span class="text-emerald-400 mdi mdi-check-circle"></span></div>`;
+        }
+        if (m.meta_tags?.twitter) {
+            html += `<div class="flex items-center justify-between"><span class="flex items-center gap-1"><span class="text-slate-400">Twitter Card</span><button onclick="showMetaModal(\\\'twitter\\\')" class="text-cyan-400 hover:text-cyan-300 ml-2"><span class="mdi mdi-image-outline"></span></button></span><span class="text-emerald-400 mdi mdi-check-circle"></span></div>`;
+        }
+        html += `</div></div>`;
+    }
+    
+    html += `</div>`;
+    
+    // Two column layout
+    html += `<div class="grid grid-cols-1 md:grid-cols-12 gap-6">`;
+    
+    // Left column (5 cols)
+    html += `<div class="md:col-span-5 space-y-6">`;
+    
+    // Domain Registration
+    if (data.domain && data.domain.length) {
+        const whoisBtn = rawFiles.whois_domain ? `<button onclick="showRawModal(\\\'Raw WHOIS\\\', rawFiles.whois_domain)" class="text-xs text-cyan-400 hover:underline">View Raw</button>` : "";
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30 flex justify-between items-center">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider">Domain Registration</h3>
+                ${whoisBtn}
+            </div>
+            <div class="divide-y divide-slate-800">`;
+        data.domain.forEach(item => {
+            html += `<div class="px-5 py-3 grid grid-cols-3 gap-4"><dt class="text-sm font-medium text-slate-400">${esc(item.name)}</dt><dd class="text-sm text-slate-200 col-span-2 break-words font-mono">${esc(item.value)}</dd></div>`;
+        });
+        html += `</div></div>`;
+    }
+    
+    // Network Coordinates (IP)
+    if (data.ip_lookup && Object.keys(data.ip_lookup).length) {
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider">Network Coordinates</h3>
+            </div>
+            <div class="p-5 space-y-6">`;
+        for (const [ip, info] of Object.entries(data.ip_lookup)) {
+            html += `<div class="bg-slate-950 rounded-lg p-3 border border-slate-800">
+                <div class="flex items-center gap-2 mb-3"><span class="h-2 w-2 rounded-full bg-emerald-500"></span><span class="font-mono text-sm font-bold text-slate-200">${esc(ip)}</span></div>
+                <div class="space-y-1">`;
+            if (Array.isArray(info)) {
+                info.forEach(item => {
+                    if (item.value && item.value !== "N/A") html += `<div class="grid grid-cols-3 gap-2 text-xs"><span class="text-slate-400">${esc(item.name)}</span><span class="col-span-2 text-slate-300 font-mono truncate">${esc(item.value)}</span></div>`;
+                });
+            } else if (info && typeof info === "object") {
+                for (const [k, v] of Object.entries(info)) {
+                    if (v && v !== "N/A") html += `<div class="grid grid-cols-3 gap-2 text-xs"><span class="text-slate-400">${esc(k)}</span><span class="col-span-2 text-slate-300 font-mono truncate">${esc(v)}</span></div>`;
+                }
+            }
+            html += `</div></div>`;
+        }
+        html += `</div></div>`;
+    }
+    
+    // HTTP Headers
+    if (data.http_headers && Object.keys(data.http_headers).length) {
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider">Headers</h3>
+            </div>
+            <div class="overflow-x-auto"><table class="min-w-full divide-y divide-slate-800"><tbody class="divide-y divide-slate-800">`;
+        for (const [key, value] of Object.entries(data.http_headers)) {
+            html += `<tr><td class="px-5 py-2 text-xs font-medium text-slate-400 whitespace-nowrap">${esc(key)}</td><td class="px-5 py-2 text-xs font-mono text-slate-300 break-all">${esc(value)}</td></tr>`;
+        }
+        html += `</tbody></table></div></div>`;
+    }
+    
+    html += `</div>`; // end left column
+    
+    // Right column (7 cols)
+    html += `<div class="md:col-span-7 space-y-6">`;
+
+    // SPF Analysis
+    const spf = getSpfAnalysis(data.dns_records);
+    if (spf) {
+        let statusColor = spf.isValid && !spf.hasWarnings ? "text-emerald-400" : (spf.hasWarnings ? "text-amber-400" : "text-red-400");
+        let statusIcon = spf.isValid && !spf.hasWarnings ? "mdi-check-circle" : (spf.hasWarnings ? "mdi-alert" : "mdi-close-circle");
+        let statusText = spf.isValid && !spf.hasWarnings ? "Valid" : (spf.hasWarnings ? "Valid with warnings" : "Invalid");
+        
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30 flex justify-between items-center">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider">SPF Analysis</h3>
+                <div class="flex items-center gap-2">
+                    <span class="inline-flex items-center gap-1 text-xs font-medium ${statusColor}"><span class="mdi ${statusIcon}"></span> ${statusText}</span>
+                    <span class="text-xs text-slate-400 font-mono">${spf.dnsLookups}/10 lookups</span>
+                </div>
+            </div>`;
+        
+        if (spf.errors.length > 0) {
+            html += `<div class="px-5 py-3 bg-red-900/20 border-b border-red-900/30">`;
+            spf.errors.forEach(e => html += `<div class="flex items-start gap-2 text-sm text-red-300"><span class="mdi mdi-close-circle mt-0.5 shrink-0"></span><span>${esc(e)}</span></div>`);
+            html += `</div>`;
+        }
+        if (spf.warnings.length > 0) {
+            html += `<div class="px-5 py-3 bg-amber-900/20 border-b border-amber-900/30">`;
+            spf.warnings.forEach(w => html += `<div class="flex items-start gap-2 text-sm text-amber-300"><span class="mdi mdi-alert mt-0.5 shrink-0"></span><span>${esc(w)}</span></div>`);
+            html += `</div>`;
+        }
+
+        html += `<div class="divide-y divide-slate-800">`;
+        spf.mechanisms.forEach(m => {
+            let qualClass = m.qualifier === "+" ? "bg-emerald-900/30 text-emerald-300" : (m.qualifier === "-" ? "bg-red-900/30 text-red-300" : (m.qualifier === "~" ? "bg-amber-900/30 text-amber-300" : "bg-slate-800 text-slate-400"));
+            let iconClass = "mdi-cog text-slate-400";
+            if (m.type === "include") iconClass = "mdi-call-merge text-cyan-500";
+            else if (m.type.startsWith("ip")) iconClass = "mdi-ip text-emerald-500";
+            else if (m.type === "a") iconClass = "mdi-alpha-a-circle text-blue-500";
+            else if (m.type === "mx") iconClass = "mdi-email text-purple-500";
+            else if (m.type === "all") iconClass = "mdi-shield text-slate-500";
+            else if (m.type === "redirect") iconClass = "mdi-arrow-right-bold text-orange-500";
+
+            html += `<div class="px-5 py-3 flex items-center gap-4 hover:bg-slate-800/30 transition-colors">
+                <div class="shrink-0 w-8 text-center"><span class="mdi ${iconClass}"></span></div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                        <code class="text-xs font-mono text-slate-300">${esc(m.raw)}</code>
+                        ${m.provider ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-cyan-900/30 text-cyan-300">${esc(m.provider)}</span>` : ""}
+                        ${m.isDns ? `<span class="inline-flex items-center gap-0.5 text-[10px] text-slate-400" title="DNS lookup"><span class="mdi mdi-dns"></span></span>` : ""}
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5">${esc(m.description)}</p>
+                </div>
+                ${m.qualifier && m.type !== "version" ? `<div class="shrink-0"><span class="text-xs font-mono px-1.5 py-0.5 rounded ${qualClass}">${esc(m.qualifierDesc)}</span></div>` : ""}
+            </div>`;
+        });
+        html += `</div></div>`;
+    }
+
+    // Email Health
+    const health = getEmailHealth(data.dns_records);
+    if (health) {
+        let gradeColor = health.grade === "A" ? "text-emerald-400" : (health.grade === "B" ? "text-cyan-400" : (health.grade === "C" ? "text-amber-400" : "text-red-400"));
+        
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider">Email Health</h3>
+                <div class="flex items-center gap-3">
+                    <span class="text-2xl font-bold ${gradeColor}">${health.grade}</span>
+                    <span class="text-sm text-slate-400 font-mono">${health.score}/100</span>
+                </div>
+            </div>
+            <div class="divide-y divide-slate-800">`;
+        
+        // MX
+        html += `<div class="px-5 py-3 flex items-center gap-4">
+            <div class="shrink-0 w-8 text-center"><span class="mdi mdi-email text-purple-500"></span></div>
+            <div class="flex-1 min-w-0">
+                <div class="text-sm font-medium text-slate-300">MX Records</div>
+                <p class="text-xs text-slate-400 mt-0.5">${health.mxCount} mail server(s) configured</p>
+            </div>
+            <div class="shrink-0"><span class="text-xs font-mono px-2 py-1 rounded bg-emerald-900/30 text-emerald-300">+10 pts</span></div>
+        </div>`;
+        
+        // SPF
+        html += `<div class="px-5 py-3 flex items-center gap-4">
+            <div class="shrink-0 w-8 text-center"><span class="mdi ${health.spf.present ? "mdi-check-circle text-emerald-500" : "mdi-close-circle text-red-400"}"></span></div>
+            <div class="flex-1 min-w-0">
+                <div class="text-sm font-medium text-slate-300">SPF</div>
+                <p class="text-xs text-slate-400 mt-0.5">${health.spf.present ? health.spf.details.join(" · ") : "No SPF record found"}</p>
+            </div>
+            <div class="shrink-0"><span class="text-xs font-mono px-2 py-1 rounded ${health.spf.score > 0 ? "bg-emerald-900/30 text-emerald-300" : "bg-red-900/30 text-red-300"}">+${health.spf.score}/25 pts</span></div>
+        </div>`;
+        
+        // DKIM
+        html += `<div class="px-5 py-3 flex items-center gap-4">
+            <div class="shrink-0 w-8 text-center"><span class="mdi ${health.dkim.present ? "mdi-key text-cyan-500" : "mdi-key-remove text-red-400"}"></span></div>
+            <div class="flex-1 min-w-0">
+                <div class="text-sm font-medium text-slate-300">DKIM</div>
+                <p class="text-xs text-slate-400 mt-0.5">${health.dkim.present ? health.dkim.details.join(" · ") : "No DKIM records found"}</p>
+            </div>
+            <div class="shrink-0"><span class="text-xs font-mono px-2 py-1 rounded ${health.dkim.score > 0 ? "bg-emerald-900/30 text-emerald-300" : "bg-red-900/30 text-red-300"}">+${health.dkim.score}/30 pts</span></div>
+        </div>`;
+        
+        // DMARC
+        html += `<div class="px-5 py-3 flex items-center gap-4">
+            <div class="shrink-0 w-8 text-center"><span class="mdi ${health.dmarc.present ? "mdi-shield-check text-emerald-500" : "mdi-shield-off text-red-400"}"></span></div>
+            <div class="flex-1 min-w-0">
+                <div class="text-sm font-medium text-slate-300">DMARC</div>
+                <p class="text-xs text-slate-400 mt-0.5">${health.dmarc.present ? health.dmarc.details.join(" · ") : "No DMARC record found"}</p>
+            </div>
+            <div class="shrink-0"><span class="text-xs font-mono px-2 py-1 rounded ${health.dmarc.score > 0 ? "bg-emerald-900/30 text-emerald-300" : "bg-red-900/30 text-red-300"}">+${health.dmarc.score}/35 pts</span></div>
+        </div>`;
+
+        // Recommendations
+        if (health.recommendations.length > 0) {
+            html += `<div class="px-5 py-3 bg-amber-900/20 border-t border-amber-900/30">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="mdi mdi-lightbulb text-amber-400"></span>
+                    <span class="text-xs font-semibold text-amber-300 uppercase tracking-wider">Recommendations</span>
+                </div>
+                <ul class="space-y-1">`;
+            health.recommendations.forEach(rec => {
+                html += `<li class="text-sm text-amber-300 flex items-start gap-2">
+                    <span class="mdi mdi-chevron-right mt-0.5 shrink-0"></span>
+                    <span>${esc(rec)}</span>
+                </li>`;
+            });
+            html += `</ul></div>`;
+        }
+        
+        html += `</div></div>`;
+    }
+
+    // DNS Records
+    if (data.dns_records && data.dns_records.length) {
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider">DNS Records <span class="text-slate-500 font-normal">(${data.dns_records.length})</span></h3>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead><tr class="border-b border-slate-800 text-slate-400 text-xs uppercase"><th class="px-5 py-3 text-left">Type</th><th class="px-5 py-3 text-left">Name</th><th class="px-5 py-3 text-left">Value</th></tr></thead>
+                    <tbody class="divide-y divide-slate-800">`;
+        data.dns_records.forEach(rec => {
+            html += `<tr><td class="px-5 py-2"><span class="px-2 py-0.5 bg-slate-800 text-slate-300 rounded text-xs font-medium">${esc(rec.type)}</span></td><td class="px-5 py-2 font-mono text-slate-300 text-xs">${esc(rec.name)}</td><td class="px-5 py-2 font-mono text-slate-300 text-xs break-all">${esc(rec.value)}</td></tr>`;
+        });
+        html += `</tbody></table></div></div>`;
+    }
+    
+    // BIND Zone File
+    if (data.zone) {
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider">BIND Zone File</h3>
+            </div>
+            <div class="p-4">
+                <pre class="text-xs font-mono text-slate-300 whitespace-pre-wrap break-all bg-slate-950 p-4 rounded-lg overflow-x-auto max-h-96">${esc(data.zone)}</pre>
+            </div>
+        </div>`;
+    }
+    
+    html += `</div>`; // end right column
+    html += `</div>`; // end two-column grid
+    
+    r.innerHTML = html;
+}
+
+function esc(s) { 
+    if (s === null || s === undefined) return "";
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); 
+}
+
+render();
+</script>
+</body>
+</html>';
+        exit;
+    }
 }
 
 if (isset($_GET['dig'])) {
