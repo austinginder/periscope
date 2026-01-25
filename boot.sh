@@ -134,6 +134,12 @@ cat << 'EOF' > "$ENGINE_FILE"
 error_reporting(E_ERROR | E_PARSE);
 ini_set('display_errors', '0');
 
+// --- CLI ARGUMENT PARSING ---
+if (php_sapi_name() === 'cli' && isset($argv[1])) {
+    parse_str($argv[1], $cli_params);
+    $_GET = array_merge($_GET, $cli_params);
+}
+
 // --- PLUGIN VERSION ---
 define('PERISCOPE_VERSION', '1.3');
 
@@ -2355,7 +2361,13 @@ function cliProgressDone($message) {
 
 // --- CLI EXECUTION ---
 if (php_sapi_name() === 'cli' && !isset($_SERVER['REQUEST_METHOD'])) {
-    if ($argc < 2) { echo "Usage: php engine.php <domain>\n"; exit(1); }
+    if ($argc < 2) { echo "Usage: php engine.php <domain|action=bulk_upgrade>\n"; exit(1); }
+    
+    // Check if this is an action command (not a domain scan)
+    if (isset($_GET['action'])) {
+        goto handle_actions;
+    }
+    
     $CLI_MODE = true;
     $domain = $argv[1];
 
@@ -2850,6 +2862,62 @@ if ($pdo) {
         $data = computeFromRaw($raw, $row['domain'], $row['timestamp'], true);
         $data['timestamp'] = $row['timestamp'];
         echo json_encode(['success' => true, 'data' => $data]);
+        exit;
+    }
+    
+    if ($action === 'bulk_upgrade') {
+        if (php_sapi_name() !== 'cli') {
+            echo json_encode(['error' => 'CLI only']);
+            exit;
+        }
+        
+        $stmt = $pdo->query("SELECT id, domain, timestamp, data FROM history ORDER BY timestamp DESC");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $total = count($rows);
+        $upgraded = 0;
+        $skipped = 0;
+        $failed = 0;
+        
+        echo "Periscope Bulk Upgrade - Target version: " . PERISCOPE_VERSION . "\n";
+        echo "Found $total scans to process\n\n";
+        
+        foreach ($rows as $i => $row) {
+            $num = $i + 1;
+            $domain = $row['domain'];
+            $timestamp = $row['timestamp'];
+            $path = getScanPath($domain, $timestamp);
+            
+            if (!is_dir($path)) {
+                echo "[$num/$total] $domain - skipped (legacy, no raw files)\n";
+                $skipped++;
+                continue;
+            }
+            
+            $cache = loadResponseCache($path);
+            if (isCacheValid($cache)) {
+                echo "[$num/$total] $domain - skipped (already v" . PERISCOPE_VERSION . ")\n";
+                $skipped++;
+                continue;
+            }
+            
+            $oldVersion = $cache['plugin_version'] ?? 'none';
+            echo "[$num/$total] Upgrading $domain ($oldVersion -> " . PERISCOPE_VERSION . ")...";
+            
+            try {
+                $raw = loadRawFiles($path);
+                $data = computeFromRaw($raw, $domain, $timestamp, true);
+                echo " done\n";
+                $upgraded++;
+            } catch (Exception $e) {
+                echo " FAILED: " . $e->getMessage() . "\n";
+                $failed++;
+            }
+        }
+        
+        echo "\n=== Complete ===\n";
+        echo "Upgraded: $upgraded\n";
+        echo "Skipped:  $skipped\n";
+        echo "Failed:   $failed\n";
         exit;
     }
     
