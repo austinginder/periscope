@@ -3576,7 +3576,123 @@ function render() {
         </div>`;
     }
     html += `</div>`;
-    
+
+    // WordPress Plugins
+    if (data.cms && data.cms.name === "WordPress" && data.cms.plugins && data.cms.plugins.length > 0) {
+        const knownPlugins = {
+            "gravityforms": "Gravity Forms",
+            "advanced-custom-fields": "Advanced Custom Fields",
+            "advanced-custom-fields-pro": "Advanced Custom Fields Pro",
+            "akismet": "Akismet Anti-Spam",
+            "all-in-one-seo-pack": "All in One SEO",
+            "all-in-one-wp-migration": "All-in-One WP Migration",
+            "autoptimize": "Autoptimize",
+            "bbpress": "bbPress",
+            "beaver-builder-lite-version": "Beaver Builder",
+            "better-wp-security": "iThemes Security",
+            "broken-link-checker": "Broken Link Checker",
+            "buddypress": "BuddyPress",
+            "classic-editor": "Classic Editor",
+            "contact-form-7": "Contact Form 7",
+            "cookie-law-info": "GDPR Cookie Consent",
+            "custom-post-type-ui": "Custom Post Type UI",
+            "disable-comments": "Disable Comments",
+            "duplicate-post": "Yoast Duplicate Post",
+            "duplicator": "Duplicator",
+            "easy-digital-downloads": "Easy Digital Downloads",
+            "elementor": "Elementor",
+            "elementor-pro": "Elementor Pro",
+            "envira-gallery-lite": "Envira Gallery",
+            "essential-addons-for-elementor-lite": "Essential Addons for Elementor",
+            "ewww-image-optimizer": "EWWW Image Optimizer",
+            "favicon-by-realfavicongenerator": "Favicon by RealFaviconGenerator",
+            "flamingo": "Flamingo",
+            "google-analytics-for-wordpress": "MonsterInsights",
+            "google-sitemap-generator": "Google XML Sitemaps",
+            "gtranslate": "GTranslate",
+            "header-footer-elementor": "Elementor Header & Footer Builder",
+            "hello-dolly": "Hello Dolly",
+            "instagram-feed": "Smash Balloon Instagram Feed",
+            "jetpack": "Jetpack",
+            "limit-login-attempts-reloaded": "Limit Login Attempts Reloaded",
+            "litespeed-cache": "LiteSpeed Cache",
+            "mailchimp-for-wp": "MC4WP: Mailchimp for WordPress",
+            "mailpoet": "MailPoet",
+            "megamenu": "Max Mega Menu",
+            "members": "Members",
+            "ninja-forms": "Ninja Forms",
+            "optinmonster": "OptinMonster",
+            "really-simple-ssl": "Really Simple SSL",
+            "redirection": "Redirection",
+            "regenerate-thumbnails": "Regenerate Thumbnails",
+            "restrict-content": "Restrict Content",
+            "revslider": "Slider Revolution",
+            "safe-svg": "Safe SVG",
+            "sg-cachepress": "SiteGround Optimizer",
+            "shortpixel-image-optimiser": "ShortPixel Image Optimizer",
+            "simple-custom-css": "Simple Custom CSS",
+            "siteguard": "SiteGuard WP Plugin",
+            "slideshow-gallery": "Slideshow Gallery",
+            "smart-slider-3": "Smart Slider 3",
+            "smtp-mailer": "SMTP Mailer",
+            "so-widgets-bundle": "SiteOrigin Widgets Bundle",
+            "tablepress": "TablePress",
+            "the-events-calendar": "The Events Calendar",
+            "tinymce-advanced": "Advanced Editor Tools",
+            "translatepress-multilingual": "TranslatePress",
+            "updraftplus": "UpdraftPlus",
+            "user-role-editor": "User Role Editor",
+            "w3-total-cache": "W3 Total Cache",
+            "webp-converter-for-media": "WebP Converter for Media",
+            "widget-importer-exporter": "Widget Importer & Exporter",
+            "woocommerce": "WooCommerce",
+            "woocommerce-gateway-stripe": "WooCommerce Stripe Gateway",
+            "woocommerce-payments": "WooPayments",
+            "woocommerce-pdf-invoices-packing-slips": "PDF Invoices & Packing Slips for WooCommerce",
+            "woolentor-addons": "ShopLentor",
+            "wordpress-importer": "WordPress Importer",
+            "wordpress-seo": "Yoast SEO",
+            "wordfence": "Wordfence Security",
+            "wpforms-lite": "WPForms Lite",
+            "wpforms": "WPForms",
+            "wp-fastest-cache": "WP Fastest Cache",
+            "wp-mail-smtp": "WP Mail SMTP",
+            "wp-migrate-db": "WP Migrate DB",
+            "wp-optimize": "WP-Optimize",
+            "wp-pagenavi": "WP-PageNavi",
+            "wp-reset": "WP Reset",
+            "wp-rocket": "WP Rocket",
+            "wp-smushit": "Smush",
+            "wp-statistics": "WP Statistics",
+            "wp-super-cache": "WP Super Cache",
+            "yith-woocommerce-wishlist": "YITH WooCommerce Wishlist",
+        };
+        const getPluginName = (slug) => knownPlugins[slug.toLowerCase()] || null;
+
+        html += `<div class="mb-6">
+            <div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+                    <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider"><span class="mdi mdi-puzzle-outline mr-1"></span> WordPress Plugins</h3>
+                </div>
+                <div class="p-4">
+                    <p class="text-xs text-slate-400 mb-3">${data.cms.plugins.length} plugin${data.cms.plugins.length !== 1 ? "s" : ""} detected from HTML source</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">`;
+        data.cms.plugins.forEach(plugin => {
+            const name = getPluginName(plugin);
+            html += `<div class="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50">
+                <span class="mdi mdi-puzzle text-slate-500"></span>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-slate-200 truncate" title="${name || esc(plugin)}">${name || esc(plugin)}</p>
+                    ${name ? `<p class="text-xs text-slate-400 font-mono truncate">${esc(plugin)}</p>` : ""}
+                </div>
+            </div>`;
+        });
+        html += `</div>
+                </div>
+            </div>
+        </div>`;
+    }
+
     // Second row - Security, Technology, Metadata
     html += `<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">`;
     
