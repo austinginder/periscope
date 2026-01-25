@@ -428,8 +428,13 @@
                                     Multi-tenant
                                 </a>
                             </span>
-                            <span v-if="response.cms && response.cms.version" class="font-mono text-sm px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                                v{{ response.cms.version }}
+                            <span class="flex items-center gap-2">
+                                <span v-if="response.cms && response.cms.version" class="font-mono text-sm px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                    v{{ response.cms.version }}
+                                </span>
+                                <span v-if="response.infrastructure && response.infrastructure.language" class="font-mono text-sm px-3 py-1 rounded-lg bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300">
+                                    {{ response.infrastructure.language }}
+                                </span>
                             </span>
                         </div>
                     </div>
@@ -442,7 +447,7 @@
                             </h3>
                         </div>
                         <div class="p-5">
-                            <div class="grid grid-cols-3 gap-4 text-sm">
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                 <div v-if="response.infrastructure.host">
                                     <p class="text-slate-500 dark:text-slate-400 mb-1">Host</p>
                                     <p class="font-medium text-slate-900 dark:text-slate-200">{{ response.infrastructure.host }}</p>

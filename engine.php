@@ -786,8 +786,80 @@ function detectCMS($domain, $html = null, $headers = []) {
 }
 
 function detectInfrastructure($headers) {
-    $result = ['cdn' => null, 'host' => null, 'server' => null];
+    $result = ['cdn' => null, 'host' => null, 'server' => null, 'language' => null];
     $h = array_change_key_case($headers, CASE_LOWER);
+
+    // Server-side language detection
+    // X-Powered-By header (PHP, ASP.NET, Express, etc.)
+    if (isset($h['x-powered-by'])) {
+        $xpb = $h['x-powered-by'];
+        if (preg_match('/PHP\/?([\d.]+)?/i', $xpb, $m)) {
+            $result['language'] = 'PHP' . (!empty($m[1]) ? ' ' . $m[1] : '');
+        } elseif (preg_match('/ASP\.NET/i', $xpb)) {
+            $result['language'] = 'ASP.NET';
+            if (preg_match('/version[:\s]*([\d.]+)/i', $xpb, $m)) {
+                $result['language'] .= ' ' . $m[1];
+            }
+        } elseif (preg_match('/Express/i', $xpb)) {
+            $result['language'] = 'Node.js (Express)';
+        } elseif (preg_match('/Next\.?js/i', $xpb)) {
+            $result['language'] = 'Node.js (Next.js)';
+        } elseif (preg_match('/Servlet/i', $xpb)) {
+            $result['language'] = 'Java (Servlet)';
+        } elseif (preg_match('/JSP/i', $xpb)) {
+            $result['language'] = 'Java (JSP)';
+        } elseif (preg_match('/Phusion Passenger/i', $xpb)) {
+            $result['language'] = 'Ruby (Passenger)';
+        } elseif (preg_match('/Puma/i', $xpb)) {
+            $result['language'] = 'Ruby (Puma)';
+        } elseif (preg_match('/Unicorn/i', $xpb)) {
+            $result['language'] = 'Ruby (Unicorn)';
+        } elseif (preg_match('/Uvicorn/i', $xpb)) {
+            $result['language'] = 'Python (Uvicorn)';
+        } elseif (preg_match('/gunicorn/i', $xpb)) {
+            $result['language'] = 'Python (Gunicorn)';
+        } elseif (preg_match('/Werkzeug/i', $xpb)) {
+            $result['language'] = 'Python (Flask)';
+        } elseif (preg_match('/Django/i', $xpb)) {
+            $result['language'] = 'Python (Django)';
+        } elseif (preg_match('/Kestrel/i', $xpb)) {
+            $result['language'] = '.NET (Kestrel)';
+        } elseif (preg_match('/PleskLin/i', $xpb)) {
+            $result['language'] = 'Plesk (Linux)';
+        } elseif (preg_match('/PleskWin/i', $xpb)) {
+            $result['language'] = 'Plesk (Windows)';
+        }
+    }
+
+    // X-AspNet-Version header
+    if (!$result['language'] && isset($h['x-aspnet-version'])) {
+        $result['language'] = 'ASP.NET ' . $h['x-aspnet-version'];
+    }
+
+    // X-AspNetMvc-Version header
+    if (!$result['language'] && isset($h['x-aspnetmvc-version'])) {
+        $result['language'] = 'ASP.NET MVC ' . $h['x-aspnetmvc-version'];
+    }
+
+    // Set-Cookie can hint at language/framework
+    if (!$result['language'] && isset($h['set-cookie'])) {
+        $cookie = is_array($h['set-cookie']) ? implode(' ', $h['set-cookie']) : $h['set-cookie'];
+        if (preg_match('/PHPSESSID/i', $cookie)) {
+            $result['language'] = 'PHP';
+        } elseif (preg_match('/JSESSIONID/i', $cookie)) {
+            $result['language'] = 'Java';
+        } elseif (preg_match('/ASP\.NET_SessionId/i', $cookie)) {
+            $result['language'] = 'ASP.NET';
+        } elseif (preg_match('/rack\.session/i', $cookie)) {
+            $result['language'] = 'Ruby';
+        } elseif (preg_match('/connect\.sid/i', $cookie)) {
+            $result['language'] = 'Node.js';
+        } elseif (preg_match('/django_session|csrftoken/i', $cookie)) {
+            $result['language'] = 'Python (Django)';
+        } elseif (preg_match('/laravel_session/i', $cookie)) {
+            $result['language'] = 'PHP (Laravel)';
+        }
+    }
 
     // Server software
     if (isset($h['server'])) {
@@ -1041,7 +1113,7 @@ function detectInfrastructure($headers) {
     }
 
     // Only return if we found something
-    if ($result['cdn'] || $result['host'] || $result['server']) {
+    if ($result['cdn'] || $result['host'] || $result['server'] || $result['language']) {
         return $result;
     }
     return null;
@@ -3480,7 +3552,10 @@ function render() {
                     ${data.cms.multisite ? `<span class="text-xs px-2 py-0.5 rounded-full bg-purple-900/30 text-purple-300 border border-purple-800/50" title="WordPress Multisite detected">Multisite</span>` : ""}
                     ${data.cms.multitenancy ? `<span class="text-xs px-2 py-0.5 rounded-full bg-amber-900/30 text-amber-300 border border-amber-800/50" title="WP Freighter Multi-tenant detected">Multi-tenant</span>` : ""}
                 </div>
-                ${data.cms.version ? `<span class="font-mono text-sm px-3 py-1 rounded-lg bg-slate-800 text-slate-400">v${esc(data.cms.version)}</span>` : ""}
+                <div class="flex items-center gap-2">
+                    ${data.cms.version ? `<span class="font-mono text-sm px-3 py-1 rounded-lg bg-slate-800 text-slate-400">v${esc(data.cms.version)}</span>` : ""}
+                    ${data.infrastructure && data.infrastructure.language ? `<span class="font-mono text-sm px-3 py-1 rounded-lg bg-cyan-900/30 text-cyan-300">${esc(data.infrastructure.language)}</span>` : ""}
+                </div>
             </div>
         </div>`;
     }
