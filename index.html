@@ -570,11 +570,16 @@
                             <div v-if="response.metadata.sitemap && response.metadata.sitemap.present" class="flex items-center justify-between">
                                 <span class="flex items-center gap-1">
                                     <span class="text-slate-600 dark:text-slate-400">sitemap.xml</span>
-                                    <button v-if="response.metadata.sitemap.raw_stored" @click="showRawPreview('sitemap_xml', 'sitemap.xml')" class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
+                                    <button v-if="response.metadata.sitemap.raw_stored" @click="showRawPreview('sitemap_xml', 'sitemap.xml')"
+                                        class="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300" title="Preview">
                                         <span class="mdi mdi-eye-outline"></span>
                                     </button>
                                 </span>
-                                <span class="text-emerald-600 dark:text-emerald-400"><span class="mdi mdi-check-circle"></span></span>
+                                <span class="text-emerald-600 dark:text-emerald-400">
+                                    <span class="mdi mdi-check-circle"></span>
+                                    <span v-if="response.metadata.sitemap.url_count" class="ml-1 text-slate-500 dark:text-slate-500">({{
+                                        response.metadata.sitemap.url_count }} URLs)</span>
+                                </span>
                             </div>
                             <div v-if="response.metadata.security_txt && response.metadata.security_txt.present" class="flex items-center justify-between">
                                 <span class="flex items-center gap-1">
@@ -720,7 +725,6 @@
                                 </span>
                                 <span class="text-emerald-600 dark:text-emerald-400">
                                     <span class="mdi mdi-check-circle"></span>
-                                    <span v-if="response.metadata.favicon.hash" class="ml-1 font-mono text-slate-500">{{ response.metadata.favicon.hash.substring(0, 8) }}...</span>
                                 </span>
                             </div>
 

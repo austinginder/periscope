@@ -1823,6 +1823,11 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
     $dnsRecords = $raw['dns']['records'] ?? [];
     $zoneFile = $raw['dns']['zone'] ?? '';
 
+    // Calculate target_host/root_domain/is_subdomain for consistency with live scans
+    $targetHost = normalizeInput($domain);
+    $rootDomain = extractRootDomain($targetHost);
+    $isSubdomain = ($targetHost !== $rootDomain);
+
     // Parse IP lookup from stored whois_ips
     $ip_lookup = [];
     if (!empty($raw['whois_ips'])) {
@@ -1856,6 +1861,9 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
     $robotsTxtContent = $raw['robots_txt'] ?? ($metadataRawFiles['robots_txt'] ?? null);
 
     $data = [
+        'target_host' => $targetHost,
+        'root_domain' => $rootDomain,
+        'is_subdomain' => $isSubdomain,
         'domain' => $domainData,
         'dns_records' => $dnsRecords,
         'zone' => $zoneFile,
@@ -2549,7 +2557,7 @@ if ($pdo) {
                 // New scan - try cached response first
                 $path = getScanPath($row['domain'], $row['timestamp']);
                 $cache = loadResponseCache($path);
-                
+
                 if (isCacheValid($cache)) {
                     // Cache hit - return immediately
                     $data = $cache['data'];
@@ -2562,6 +2570,14 @@ if ($pdo) {
                     $data['timestamp'] = $row['timestamp'];
                     $data['cache_status'] = $cache ? 'regenerated' : 'computed';
                 }
+            }
+            // Ensure target_host/root_domain/is_subdomain exist (for old caches/legacy data)
+            if (!isset($data['target_host'])) {
+                $targetHost = normalizeInput($row['domain']);
+                $rootDomain = extractRootDomain($targetHost);
+                $data['target_host'] = $targetHost;
+                $data['root_domain'] = $rootDomain;
+                $data['is_subdomain'] = ($targetHost !== $rootDomain);
             }
             echo json_encode($data);
         } else echo json_encode([]);
@@ -2587,28 +2603,102 @@ if ($pdo) {
         $stmt->execute([$_POST['id']]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        // Delete from database
+        if (!$row) {
+            echo json_encode(['success' => false, 'error' => 'Scan not found']);
+            exit;
+        }
+
+        $domain = $row['domain'];
+        $timestamp = $row['timestamp'];
+
+        // 1. Delete from database
         $pdo->prepare("DELETE FROM history WHERE id = ?")->execute([$_POST['id']]);
 
-        // Delete raw files folder if it exists
-        if ($row && !empty($row['domain']) && !empty($row['timestamp'])) {
-            try {
-                $scanPath = getScanPath($row['domain'], $row['timestamp']);
-                $expectedBase = getenv('HOME') . "/.periscope/scans/";
-                // SAFETY: Double-check path is within expected directory before deletion
-                if (is_dir($scanPath) && strpos(realpath($scanPath), $expectedBase) === 0) {
-                    $files = glob("$scanPath/*");
-                    foreach ($files as $file) {
-                        if (is_file($file)) unlink($file);
+        // 2. Delete the specific timestamp folder (Raw text files unique to this scan)
+        $scanPath = getScanPath($domain, $timestamp);
+        $expectedBase = getenv('HOME') . "/.periscope/scans/";
+        
+        // SAFETY: Path traversal check
+        if (is_dir($scanPath) && strpos(realpath($scanPath), $expectedBase) === 0) {
+            $files = glob("$scanPath/*");
+            foreach ($files as $file) {
+                if (is_file($file)) @unlink($file);
+            }
+            @rmdir($scanPath);
+        }
+
+        // 3. Garbage Collection: Handle Shared Files
+        // Check if any other scans exist for this domain
+        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM history WHERE domain = ?");
+        $countStmt->execute([$domain]);
+        $remainingScans = (int)$countStmt->fetchColumn();
+
+        if ($remainingScans === 0) {
+            // CASE A: No scans left. Safe to delete the ENTIRE domain folder.
+            $domainPath = dirname($scanPath); // ~/.periscope/scans/domain.com
+            $filesPath = "$domainPath/files";
+            
+            // Delete shared files
+            if (is_dir($filesPath)) {
+                $sharedFiles = glob("$filesPath/*");
+                foreach ($sharedFiles as $f) @unlink($f);
+                @rmdir($filesPath);
+            }
+            
+            // Try to remove domain folder (will only work if empty)
+            @rmdir($domainPath);
+        } else {
+            // CASE B: Scans remain. We must perform Reference Counting.
+            // 1. Collect all hashes still in use by remaining scans
+            $usedHashes = [];
+            
+            // Get timestamps of all remaining scans
+            $tsStmt = $pdo->prepare("SELECT timestamp FROM history WHERE domain = ?");
+            $tsStmt->execute([$domain]);
+            $timestamps = $tsStmt->fetchAll(PDO::FETCH_COLUMN);
+
+            foreach ($timestamps as $ts) {
+                $path = getScanPath($domain, $ts);
+                $cache = loadResponseCache($path);
+                
+                // If cache exists, extract hash references
+                if ($cache && isset($cache['data']['metadata'])) {
+                    $m = $cache['data']['metadata'];
+                    
+                    // Collect Favicon Hash
+                    if (isset($m['favicon']['hash'])) $usedHashes[] = $m['favicon']['hash'];
+                    
+                    // Collect OG Image Hash
+                    if (isset($m['meta_tags']['open_graph']['image_hash'])) {
+                        $usedHashes[] = $m['meta_tags']['open_graph']['image_hash'];
                     }
-                    rmdir($scanPath);
+                    
+                    // Collect Twitter Image Hash
+                    if (isset($m['meta_tags']['twitter']['image_hash'])) {
+                        $usedHashes[] = $m['meta_tags']['twitter']['image_hash'];
+                    }
                 }
-            } catch (Exception $e) {
-                // Silently ignore path errors - database entry already deleted
+            }
+
+            // 2. Scan the physical files folder
+            $filesPath = getFilesPath($domain);
+            if (is_dir($filesPath)) {
+                $physicalFiles = glob("$filesPath/*");
+                foreach ($physicalFiles as $file) {
+                    $filename = basename($file);
+                    // Get hash from filename (e.g., "abc12345.png" -> "abc12345")
+                    $fileHash = pathinfo($filename, PATHINFO_FILENAME);
+
+                    // 3. Delete ONLY if not in the used list
+                    if (!in_array($fileHash, $usedHashes)) {
+                        @unlink($file);
+                    }
+                }
             }
         }
 
-        echo json_encode(['success'=>true]); exit;
+        echo json_encode(['success' => true]);
+        exit;
     }
     if ($action === 'export_history') {
         $stmt = $pdo->query("SELECT domain, timestamp, data FROM history ORDER BY timestamp DESC");
@@ -2824,14 +2914,36 @@ if ($pdo) {
             exit;
         }
         
+        // 1. Check Database for Legacy Data
+        $stmt = $pdo->prepare("SELECT data FROM history WHERE domain = ? AND timestamp = ?");
+        $stmt->execute([$domain, $timestamp]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $data = null;
         $path = getScanPath($domain, $timestamp);
-        $cache = loadResponseCache($path);
-        $raw = loadRawFiles($path);
-        if (!$cache) {
-            $data = computeFromRaw($raw, $domain, $timestamp, false);
+        $raw = [];
+
+        if ($row && !empty($row['data'])) {
+            // LEGACY: Data is stored in DB column
+            $d = json_decode($row['data'], true);
+            $data = is_string($d) ? json_decode($d, true) : $d;
+            // Legacy scans won't have raw files on disk, so $raw remains empty
         } else {
-            $data = $cache['data'] ?? $cache;
+            // MODERN: Data is stored in files
+            $cache = loadResponseCache($path);
+            $raw = loadRawFiles($path);
+            if (!$cache) {
+                $data = computeFromRaw($raw, $domain, $timestamp, false);
+            } else {
+                $data = $cache['data'] ?? $cache;
+            }
         }
+
+        if (!$data) {
+            echo "Error: No data found for this scan.";
+            exit;
+        }
+
         $data['timestamp'] = (int)$timestamp;
         
         // Embed raw files for preview
@@ -3240,6 +3352,56 @@ function showMetaModal(type) {
     activeModal = modal;
 }
 
+function formatBytes(bytes) {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+}
+
+function showFaviconModal() {
+    if (activeModal) activeModal.remove();
+    const f = data.metadata.favicon;
+    const modal = document.createElement("div");
+    modal.className = "fixed inset-0 z-50 overflow-y-auto";
+    modal.innerHTML = `<div class="flex items-center justify-center min-h-screen px-4 py-8">
+        <div class="fixed inset-0 bg-slate-900/80" onclick="closeModal()"></div>
+        <div class="relative bg-slate-900 rounded-xl border border-slate-700 shadow-2xl max-w-sm w-full overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-950">
+                <h3 class="text-lg font-medium text-white">Favicon Preview</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white"><span class="mdi mdi-close text-xl"></span></button>
+            </div>
+            <div class="p-6">
+                <div class="flex flex-col items-center gap-4">
+                    <div class="flex items-end gap-6">
+                        <div class="text-center">
+                            <img src="${faviconBase64}" class="w-4 h-4 mx-auto mb-1">
+                            <span class="text-xs text-slate-500">16px</span>
+                        </div>
+                        <div class="text-center">
+                            <img src="${faviconBase64}" class="w-8 h-8 mx-auto mb-1">
+                            <span class="text-xs text-slate-500">32px</span>
+                        </div>
+                        <div class="text-center">
+                            <img src="${faviconBase64}" class="w-16 h-16 mx-auto mb-1">
+                            <span class="text-xs text-slate-500">64px</span>
+                        </div>
+                    </div>
+                    <div class="w-full mt-4 space-y-2 text-xs border-t border-slate-700 pt-4">
+                        ${f.source ? `<div class="flex justify-between"><span class="text-slate-400">Source</span><span class="font-mono text-slate-300">${esc(f.source)}</span></div>` : ""}
+                        ${f.extension ? `<div class="flex justify-between"><span class="text-slate-400">Format</span><span class="font-mono text-slate-300 uppercase">${esc(f.extension)}</span></div>` : ""}
+                        ${f.hash ? `<div class="flex justify-between"><span class="text-slate-400">MD5 Hash</span><span class="font-mono text-slate-300">${esc(f.hash)}</span></div>` : ""}
+                        ${f.size ? `<div class="flex justify-between"><span class="text-slate-400">Size</span><span class="font-mono text-slate-300">${formatBytes(f.size)}</span></div>` : ""}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+    document.body.appendChild(modal);
+    activeModal = modal;
+}
+
 function render() {
     const r = document.getElementById("report");
     let html = "";
@@ -3260,7 +3422,7 @@ function render() {
     if (data.redirect_chain && data.redirect_chain.length > 1) {
         html += `<div class="mb-6 flex justify-center">
             <div class="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm bg-amber-900/20 border border-amber-800/50">
-                <span class="text-amber-400 font-medium"><span class="mdi mdi-redirect mr-1"></span> Redirect</span>`;
+                <span class="text-amber-400 font-medium"><span class="mdi mdi-redirect mr-1"></span> Redirects</span>`;
         data.redirect_chain.forEach((hop, i) => {
             const statusClass = hop.status_code === 200 ? "bg-emerald-900/40 text-emerald-400" : 
                                hop.status_code === 301 || hop.status_code === 308 ? "bg-cyan-900/40 text-cyan-400" :
@@ -3313,7 +3475,11 @@ function render() {
                 <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider"><span class="mdi mdi-application-cog mr-1"></span> Platform</h3>
             </div>
             <div class="p-5 flex items-center justify-between">
-                <span class="text-lg font-medium text-slate-200">${esc(data.cms.name)}</span>
+                <div class="flex items-center gap-2">
+                    <span class="text-lg font-medium text-slate-200">${esc(data.cms.name)}</span>
+                    ${data.cms.multisite ? `<span class="text-xs px-2 py-0.5 rounded-full bg-purple-900/30 text-purple-300 border border-purple-800/50" title="WordPress Multisite detected">Multisite</span>` : ""}
+                    ${data.cms.multitenancy ? `<span class="text-xs px-2 py-0.5 rounded-full bg-amber-900/30 text-amber-300 border border-amber-800/50" title="WP Freighter Multi-tenant detected">Multi-tenant</span>` : ""}
+                </div>
                 ${data.cms.version ? `<span class="font-mono text-sm px-3 py-1 rounded-lg bg-slate-800 text-slate-400">v${esc(data.cms.version)}</span>` : ""}
             </div>
         </div>`;
@@ -3411,7 +3577,7 @@ function render() {
                 const hasRaw = rawFiles[item.rawKey];
                 let actionBtn = "";
                 if (item.key === "favicon" && faviconBase64) {
-                    actionBtn = `<button onclick="showImageModal(\\\'Favicon\\\', faviconBase64)" class="text-cyan-400 hover:text-cyan-300 ml-2"><span class="mdi mdi-image-outline"></span></button>`;
+                    actionBtn = `<button onclick="showFaviconModal()" class="text-cyan-400 hover:text-cyan-300 ml-2"><span class="mdi mdi-image-outline"></span></button>`;
                 } else if (hasRaw) {
                     actionBtn = `<button onclick="showRawModal(\\\'${item.name}\\\', rawFiles.${item.rawKey})" class="text-cyan-400 hover:text-cyan-300 ml-2"><span class="mdi mdi-eye-outline"></span></button>`;
                 }
