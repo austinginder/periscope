@@ -18,26 +18,42 @@ curl -sL https://periscope.run/boot.sh | bash
 
 ## ✨ Features
 
-*   **Deep DNS Scanning:** Checks A, AAAA, MX, NS, SOA, TXT, SRV, CNAME, CAA, HTTPS, SVCB, and TLSA records.
-*   **Intelligent Analysis:** Automatically flattens CNAME chains and detects modern email security standards (MTA-STS, BIMI, DKIM).
-*   **Zone File Generation:** Exports discovered records into a valid BIND Zone file.
-*   **Network Coordinates:** Resolves IP addresses to their hosting providers/organizations.
-*   **SSL Certificate Info:** Displays expiration date, days remaining, and certificate issuer.
-*   **Security Headers:** Analyzes HSTS, CSP, X-Frame-Options, and other security headers with a score rating.
-*   **CMS/Platform Detection:** Identifies WordPress, Shopify, Squarespace, Wix, Drupal, Joomla, Webflow, and Ghost.
-*   **Technology Detection:** Detects JavaScript frameworks (React, Vue, Next.js), analytics (Google Analytics, Plausible), e-commerce platforms, and chat widgets.
-*   **Infrastructure Detection:** Detects 35+ hosting providers and 15+ CDNs from HTTP headers.
-*   **Metadata Analysis:** Checks robots.txt, sitemap.xml, security.txt, Open Graph tags, and favicon fingerprinting.
-*   **History & Snapshots:** Saves every lookup to a local SQLite database. Compare current DNS states against previous versions.
-*   **Deep Linking:** Link directly to domain scans via URL parameters.
-*   **CLI Mode:** Run quick diagnostics directly from your terminal.
+* **Email Health Grading:** Automatic scoring (A-F) of email infrastructure security. Analyzes MX redundancy, SPF strictness, DKIM presence, and DMARC policies with actionable recommendations.
+* **SPF Visualizer:** Visualizes SPF record structure, identifies third-party providers, and counts DNS lookups against the RFC limit of 10.
+* **Portable Reports:** Export full domain scans as standalone, single-file HTML reports—perfect for sharing with clients or archiving.
+* **Deep DNS Scanning:** Checks A, AAAA, MX, NS, SOA, TXT, SRV, CNAME, CAA, HTTPS, SVCB, and TLSA records.
+* **Intelligent Analysis:** Automatically flattens CNAME chains and detects modern email security standards (MTA-STS, BIMI, DKIM).
+* **Zone File Generation:** Exports discovered records into a valid BIND Zone file.
+* **Network Coordinates:** Resolves IP addresses to their hosting providers/organizations with Reverse DNS (PTR) verification.
+* **SSL Certificate Info:** Displays expiration date, days remaining, and certificate issuer.
+* **Security Headers:** Analyzes and scores headers including HSTS, CSP, X-Frame-Options, and Permissions-Policy.
+* **CMS/Platform Detection:** Identifies WordPress (including Plugins/Themes), Shopify, Squarespace, Wix, Drupal, Joomla, Webflow, and Ghost.
+* **Technology Detection:** Detects JavaScript frameworks (React, Vue, Next.js, Alpine.js), analytics, e-commerce platforms, and CSS frameworks (Tailwind).
+* **Infrastructure Detection:** Detects 35+ hosting providers and 15+ CDNs via HTTP header fingerprinting.
+* **Metadata Analysis:** Checks robots.txt, sitemap.xml, security.txt, Open Graph tags, and favicon hashes.
+* **History & Snapshots:** Uses a hybrid storage engine (SQLite + flat files) to save every lookup. Compare current DNS states against previous versions.
+* **Deep Linking:** Link directly to domain scans via URL parameters.
+* **CLI Mode:** Run quick diagnostics directly from your terminal.
+
+## ⌨️ Keyboard Shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `/` | Focus search bar |
+| `?` | Show help modal |
+| `Cmd` + `K` | Open scan history |
+| `Esc` | Close modal |
+| `↑` / `↓` | Navigate lists |
+| `Enter` | Select item |
+
+*Right-click on IP addresses or Domain values in the UI to access context menus for "Dig" and "Whois".*
 
 ## 📡 DNS Records Scanned
 
 ### Core Record Types
 
 | Type | Name | Description |
-|------|------|-------------|
+| --- | --- | --- |
 | `A` | `@`, `*`, `www`, + subdomains | IPv4 addresses |
 | `AAAA` | `@`, `www` | IPv6 addresses |
 | `NS` | `@` | Nameservers |
@@ -54,7 +70,7 @@ curl -sL https://periscope.run/boot.sh | bash
 ### Subdomains Scanned
 
 | Category | Subdomains |
-|----------|------------|
+| --- | --- |
 | **Web** | `www`, `blog`, `shop`, `portal`, `cdn`, `status` |
 | **Email** | `mail`, `webmail`, `smtp`, `imap` |
 | **Hosting Panels** | `cpanel`, `whm`, `plesk` |
@@ -68,7 +84,7 @@ curl -sL https://periscope.run/boot.sh | bash
 ### Email Authentication
 
 | Record | Name | Purpose |
-|--------|------|---------|
+| --- | --- | --- |
 | SPF | `@` TXT | Sender Policy Framework |
 | DMARC | `_dmarc` | Domain-based Message Authentication |
 | MTA-STS | `_mta-sts`, `mta-sts` | Mail Transfer Agent Strict Transport Security |
@@ -78,7 +94,7 @@ curl -sL https://periscope.run/boot.sh | bash
 ### DKIM Selectors
 
 | Selector | Service |
-|----------|---------|
+| --- | --- |
 | `google._domainkey` | Google Workspace |
 | `selector1._domainkey`, `selector2._domainkey` | Microsoft 365 |
 | `default._domainkey` | Generic |
@@ -101,7 +117,7 @@ curl -sL https://periscope.run/boot.sh | bash
 ### Microsoft 365 / Office 365
 
 | Type | Name | Purpose |
-|------|------|---------|
+| --- | --- | --- |
 | CNAME | `autodiscover` | Outlook autodiscovery |
 | CNAME | `lyncdiscover` | Skype for Business |
 | CNAME | `sip` | SIP federation |
@@ -115,7 +131,7 @@ curl -sL https://periscope.run/boot.sh | bash
 ### Other Records
 
 | Type | Name | Purpose |
-|------|------|---------|
+| --- | --- | --- |
 | TXT | `_amazonses` | Amazon SES verification |
 | TXT | `_mailchannels` | MailChannels verification |
 | TXT/CNAME | `_acme-challenge` | Let's Encrypt validation |
@@ -130,7 +146,7 @@ curl -sL https://periscope.run/boot.sh | bash
 ### CDN Providers
 
 | CDN | Detection Method |
-|-----|------------------|
+| --- | --- |
 | Cloudflare | `cf-ray`, `cf-cache-status` headers |
 | CloudFront | `x-amz-cf-id`, `x-amz-cf-pop` headers |
 | Fastly | `x-served-by` header |
@@ -151,7 +167,7 @@ curl -sL https://periscope.run/boot.sh | bash
 ### Hosting Providers
 
 | Provider | Detection Method |
-|----------|------------------|
+| --- | --- |
 | Kinsta | `x-kinsta-cache`, `ki-cf-cache-status` headers |
 | WP Engine | `x-powered-by: WP Engine` header |
 | Flywheel | `x-fw-hash`, `x-fw-serve` headers |
@@ -199,7 +215,7 @@ curl -sL https://periscope.run/boot.sh | bash
 ### Web Servers
 
 | Server | Detection |
-|--------|-----------|
+| --- | --- |
 | nginx | `server: nginx` |
 | Apache | `server: Apache` |
 | LiteSpeed | `server: LiteSpeed` |
@@ -212,7 +228,7 @@ curl -sL https://periscope.run/boot.sh | bash
 ### CMS/Platform Detection
 
 | Platform | Detection Method |
-|----------|------------------|
+| --- | --- |
 | WordPress | `wp-content`, `wp-includes` in HTML |
 | Shopify | `cdn.shopify.com` in HTML |
 | Squarespace | `squarespace.com` in HTML |
@@ -227,7 +243,7 @@ curl -sL https://periscope.run/boot.sh | bash
 Periscope checks for the presence and configuration of important security headers, providing a score out of 7.
 
 | Header | Description |
-|--------|-------------|
+| --- | --- |
 | `Strict-Transport-Security` | HSTS - enforces HTTPS connections |
 | `Content-Security-Policy` | CSP - prevents XSS and injection attacks |
 | `X-Frame-Options` | Prevents clickjacking attacks |
@@ -237,15 +253,16 @@ Periscope checks for the presence and configuration of important security header
 | `X-XSS-Protection` | Legacy XSS filter (for older browsers) |
 
 Additionally, Periscope checks for:
-- `/.well-known/security.txt` - Security contact information
-- `/security.txt` - Fallback location
+
+* `/.well-known/security.txt` - Security contact information
+* `/security.txt` - Fallback location
 
 ## 💻 Technology Detection
 
-### JavaScript Frameworks
+### JavaScript & CSS Frameworks
 
 | Framework | Detection Pattern |
-|-----------|-------------------|
+| --- | --- |
 | React | `reactdom`, `__REACT`, `_reactRootContainer` |
 | Vue.js | `__VUE__`, `v-cloak`, `v-if`, `v-for` |
 | Angular | `ng-app`, `ng-controller` |
@@ -256,14 +273,13 @@ Additionally, Periscope checks for:
 | Ember.js | `ember-view`, `data-ember` |
 | jQuery | `jquery.min.js`, `jquery.js` |
 | Alpine.js | `x-data`, `x-show`, `x-bind` |
-| htmx | `hx-get`, `hx-post`, `hx-trigger` |
 | Tailwind CSS | `tailwindcss` references |
 | Bootstrap | `bootstrap.min.css`, `bootstrap.bundle` |
 
 ### Analytics Platforms
 
 | Platform | Detection Pattern |
-|----------|-------------------|
+| --- | --- |
 | Google Analytics | `google-analytics.com`, `gtag(`, `UA-*`, `G-*` |
 | Plausible | `plausible.io` |
 | Fathom | `usefathom.com` |
@@ -281,7 +297,7 @@ Additionally, Periscope checks for:
 ### E-commerce Platforms
 
 | Platform | Detection Pattern |
-|----------|-------------------|
+| --- | --- |
 | WooCommerce | `woocommerce`, `wc-block` |
 | Magento | `Mage.Cookies`, `mage-` |
 | BigCommerce | `bigcommerce.com` |
@@ -295,7 +311,7 @@ Additionally, Periscope checks for:
 ### Chat & Support Widgets
 
 | Widget | Detection Pattern |
-|--------|-------------------|
+| --- | --- |
 | Intercom | `intercom.io` |
 | Drift | `drift.com` |
 | Crisp | `crisp.chat` |
@@ -310,7 +326,7 @@ Additionally, Periscope checks for:
 ### Form & Marketing Tools
 
 | Tool | Detection Pattern |
-|------|-------------------|
+| --- | --- |
 | Typeform | `typeform.com` |
 | JotForm | `jotform.com` |
 | Google Forms | `forms.gle`, `docs.google.com/forms` |
@@ -323,7 +339,7 @@ Additionally, Periscope checks for:
 ### Files Checked
 
 | File | Purpose |
-|------|---------|
+| --- | --- |
 | `/robots.txt` | Crawling rules, disallowed paths, sitemap references |
 | `/sitemap.xml` | XML sitemap presence and URL count |
 | `/.well-known/security.txt` | Security contact and policy info |
@@ -332,7 +348,7 @@ Additionally, Periscope checks for:
 ### Meta Tags Parsed
 
 | Category | Tags |
-|----------|------|
+| --- | --- |
 | **Basic** | `title`, `description`, `keywords`, `author`, `generator` |
 | **Open Graph** | `og:title`, `og:description`, `og:image`, `og:type` |
 | **Twitter Cards** | `twitter:card`, `twitter:site`, `twitter:title` |
@@ -340,35 +356,37 @@ Additionally, Periscope checks for:
 
 ### robots.txt Analysis
 
-- Counts `Disallow` rules (potential hidden paths)
-- Extracts `Sitemap` references
-- Shows first 20 disallowed paths
+* Counts `Disallow` rules (potential hidden paths)
+* Extracts `Sitemap` references
+* Shows first 20 disallowed paths
 
 ### Favicon Fingerprinting
 
 The favicon MD5 hash can be used to identify sites using the same favicon, useful for:
-- Identifying related sites
-- Detecting default CMS favicons
-- Tracking site infrastructure changes
+
+* Identifying related sites
+* Detecting default CMS favicons
+* Tracking site infrastructure changes
 
 ## 🛠️ How it Works
 
 Periscope uses a **Local Bridge** architecture:
 
-1.  **The Interface:** Hosted at `https://periscope.run`. It provides the visualization and user experience.
-2.  **The Engine:** A lightweight PHP script running locally on your machine (default port `8989`).
-3.  **The Connection:** The Interface sends requests to `http://127.0.0.1:8989`. The Engine executes system commands (`dig`, `whois`) and returns structured JSON.
+1. **The Interface:** Hosted at `https://periscope.run`. It provides the visualization and user experience.
+2. **The Engine:** A lightweight PHP script running locally on your machine (default port `8989`).
+3. **The Connection:** The Interface sends requests to `http://127.0.0.1:8989`. The Engine executes system commands (`dig`, `whois`) and returns structured JSON.
 
-**Data Privacy:** All history and scan data are stored locally in `~/.periscope/history.db`. No scan data is sent to external servers.
+**Data Privacy:** All history and metadata are stored in a local SQLite database (`~/.periscope/history.db`), while heavy raw scan data (HTML, Headers, Images) is stored as flat files in `~/.periscope/scans/`. No scan data is sent to external servers.
 
 ## 📦 Manual Installation & Requirements
 
 If you prefer not to use the auto-bootstrapper, you can run Periscope manually.
 
 ### Requirements
-*   **OS:** macOS, Linux, or Windows (via WSL).
-*   **PHP:** 8.0+ (with `php-curl`, `php-sqlite3`, `php-cli`).
-*   **Tools:** `dig` (dnsutils/bind), `whois`, `curl`, `unzip`.
+
+* **OS:** macOS, Linux, or Windows (via WSL).
+* **PHP:** 8.0+ (with `php-curl`, `php-sqlite3`, `php-cli`).
+* **Tools:** `dig` (dnsutils/bind), `whois`, `curl`, `unzip`.
 
 ### Running from Source
 
@@ -399,9 +417,9 @@ You can link directly to a domain scan using URL parameters:
 http://127.0.0.1:8989/?local=true&domain=example.com
 ```
 
-- If the domain exists in history, the cached result is displayed immediately
-- If not found, a fresh scan is triggered automatically
-- The `local=true` parameter is required for domain lookups to work
+* If the domain exists in history, the cached result is displayed immediately
+* If not found, a fresh scan is triggered automatically
+* The `local=true` parameter is required for domain lookups to work
 
 ## 💻 CLI Usage
 
@@ -411,19 +429,15 @@ Once installed, you can use the underlying engine directly from your terminal fo
 # Standard lookup
 php ~/.periscope/engine.php google.com
 
-# Output
-# Looking up domain: google.com...
-# --- Summary for google.com ---
-# Registrar:     MarkMonitor, Inc.
-# IP Addresses:  142.250.190.46
-# ---------------------------
-# Full report saved to local database.
+# Upgrade scan history to new storage format
+php ~/.periscope/engine.php action=bulk_upgrade
+
 ```
 
 ## 📸 Screenshots
 
 | Domain Overview | DNS Records |
-| :---: | :---: |
+| --- | --- |
 | ![](screenshot-2.webp) | ![](screenshot-3.webp) |
 
 ## 🤝 Contributing
