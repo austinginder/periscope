@@ -2,7 +2,7 @@
 
 **Peer into any domain.**
 
-Periscope is a sophisticated DNS and Network diagnostic tool. It combines a beautiful web interface (`https://periscope.run`) with a **Local Bridge** running on your machine. This allows the web UI to securely execute local system tools like `dig`, `whois`, and `curl` to gather deep intelligence on domains without rate limits or proxy restrictions.
+Periscope is a sophisticated DNS and Network diagnostic tool. It combines a beautiful web interface [https://periscope.run](https://periscope.run) with a **Local Bridge** running on your machine. This allows the web UI to securely execute local system tools like `dig`, `whois`, and `curl` to gather deep intelligence on domains without rate limits or proxy restrictions.
 
 ![](screenshot-1.webp)
 
@@ -431,14 +431,21 @@ php ~/.periscope/engine.php google.com
 
 # Upgrade scan history to new storage format
 php ~/.periscope/engine.php action=bulk_upgrade
-
 ```
 
 ## 📸 Screenshots
 
-| Domain Overview | DNS Records |
-| --- | --- |
-| ![](screenshot-2.webp) | ![](screenshot-3.webp) |
+Website Overview
+
+![](screenshot-2.webp)
+
+Domain, SPF Analysis and Email Health
+
+![](screenshot-4.webp)
+
+DNS Records
+
+![](screenshot-3.webp)
 
 ## 🤝 Contributing
 
