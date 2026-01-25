@@ -120,8 +120,8 @@
                     <div
                         class="relative flex items-center bg-white dark:bg-slate-900 rounded-lg ring-1 ring-slate-900/5 dark:ring-white/10 shadow-xl">
                         <div class="pl-4 text-slate-400"><span class="mdi mdi-radar text-2xl"></span></div>
-                        <input v-model="domain" @keydown.enter="lookupDomain()" @input="showAutocomplete = true"
-                            @focus="showAutocomplete = true" @blur="handleBlur" type="text"
+                        <input v-model="domain" @keydown.enter="lookupDomain()" @input="showAutocomplete = true; searchAutocomplete()"
+                            @focus="showAutocomplete = true; searchAutocomplete()" @blur="handleBlur" type="text"
                             class="w-full bg-transparent border-0 py-4 px-4 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-0 focus:outline-none sm:text-lg"
                             placeholder="Target domain (e.g., google.com)" spellcheck="false" autocomplete="off"
                             autofocus>
@@ -1724,7 +1724,7 @@
                     serverVersion: null,
                     response: { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} },
                     currentTheme: localStorage.getItem('theme') || (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
-                    showHistoryModal: false, historyItems: [], historyTotal: 0, historySearch: '', showVersionsModal: false, domainVersions: [], showAutocomplete: false,
+                    showHistoryModal: false, historyItems: [], historyTotal: 0, historySearch: '', showVersionsModal: false, domainVersions: [], showAutocomplete: false, autocompleteSuggestions: [], autocompleteTimeout: null,
                     historyFilters: { existence: 'all', platform: 'all', scanCount: 'all' },
                     availablePlatforms: [],
                     scanCountOptions: [],
@@ -1805,6 +1805,9 @@
                 },
                 filteredHistory() {
                     if (!this.domain || this.domain.length < 1) return [];
+                    if (this.bridgeHasDb && this.autocompleteSuggestions.length > 0) {
+                        return this.autocompleteSuggestions;
+                    }
                     const unique = []; const seen = new Set();
                     const sorted = [...this.historyItems].sort((a, b) => b.timestamp - a.timestamp);
                     for (const item of sorted) {
@@ -2400,7 +2403,30 @@
 
                 // Core
                 handleBlur() { setTimeout(() => { this.showAutocomplete = false; }, 200); },
-                selectAutocomplete(item) { this.loadFromHistory(item); this.showAutocomplete = false; },
+                selectAutocomplete(item) { this.loadFromHistory(item); this.showAutocomplete = false; this.autocompleteSuggestions = []; },
+                searchAutocomplete() {
+                    clearTimeout(this.autocompleteTimeout);
+                    if (!this.domain || this.domain.length < 1) {
+                        this.autocompleteSuggestions = [];
+                        return;
+                    }
+                    if (this.bridgeHasDb) {
+                        this.autocompleteTimeout = setTimeout(() => {
+                            fetch(this.getUrl(`action=get_history&search=${encodeURIComponent(this.domain)}&limit=8`))
+                                .then(r => r.json())
+                                .then(data => {
+                                    const unique = []; const seen = new Set();
+                                    for (const item of data.items) {
+                                        if (!seen.has(item.domain)) {
+                                            unique.push(item); seen.add(item.domain);
+                                        }
+                                        if (unique.length >= 8) break;
+                                    }
+                                    this.autocompleteSuggestions = unique;
+                                });
+                        }, 150);
+                    }
+                },
                 normalizeDomain(input) {
                     if (!input) return '';
                     // Strip protocol
@@ -2420,6 +2446,7 @@
                     this.loading = true;
                     this.loadingText = "Scanning...";
                     this.showAutocomplete = false;
+                    this.autocompleteSuggestions = [];
                     this.progress = { step: 0, total: 7, percent: 0, message: 'Initializing...' };
                     this.response = { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} };
 

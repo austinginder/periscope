@@ -516,8 +516,34 @@ function getRawWhoisDomain($domain) {
     return shell_exec("whois " . escapeshellarg($domain));
 }
 
+function getRdapUrl($domain) {
+    static $bootstrap = null;
+    $tld = strtolower(substr($domain, strrpos($domain, '.') + 1));
+    
+    if ($bootstrap === null) {
+        $ch = curl_init("https://data.iana.org/rdap/dns.json");
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Periscope/' . PERISCOPE_VERSION);
+        $data = curl_exec($ch);
+        curl_close($ch);
+        $bootstrap = $data ? json_decode($data, true) : null;
+    }
+    
+    if ($bootstrap && isset($bootstrap['services'])) {
+        foreach ($bootstrap['services'] as $service) {
+            if (in_array($tld, $service[0])) {
+                return rtrim($service[1][0], '/') . '/domain/' . $domain;
+            }
+        }
+    }
+    
+    return "https://rdap.org/domain/" . $domain;
+}
+
 function getRawRdap($domain) {
-    $ch = curl_init("https://rdap.org/domain/" . $domain);
+    $url = getRdapUrl($domain);
+    $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_USERAGENT, 'Periscope/' . PERISCOPE_VERSION);
@@ -528,7 +554,8 @@ function getRawRdap($domain) {
 }
 
 function checkDomainExists($domain) {
-    $ch = curl_init("https://rdap.org/domain/" . $domain);
+    $url = getRdapUrl($domain);
+    $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_USERAGENT, 'Periscope/' . PERISCOPE_VERSION);
@@ -1565,22 +1592,20 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
 
     // Check change-password (security best practice)
     $changePassCtx = stream_context_create([
-        'http' => ['timeout' => 2, 'ignore_errors' => true, 'follow_location' => 0],
+        'http' => ['timeout' => 2, 'ignore_errors' => true, 'follow_location' => 1],
         'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
     ]);
     @file_get_contents("https://" . $domain . "/.well-known/change-password", false, $changePassCtx);
     $changePassHeaders = $http_response_header ?? [];
     $changePassStatus = 0;
-    $changePassRedirect = null;
-    if (!empty($changePassHeaders[0]) && preg_match('/HTTP\/\d\.?\d?\s+(\d{3})/', $changePassHeaders[0], $m)) {
-        $changePassStatus = (int)$m[1];
-    }
-    // Check for redirect location
-    foreach ($changePassHeaders as $header) {
-        if (preg_match('/^Location:\s*(.+)/i', $header, $m)) {
-            $changePassRedirect = trim($m[1]);
-            break;
+    if (!empty($changePassHeaders)) {
+        foreach ($changePassHeaders as $h) {
+            if (preg_match('/HTTP\/\d\.?\d?\s+(\d{3})/', $h, $m)) $changePassStatus = (int)$m[1];
         }
+    }
+    $changePassRedirect = null;
+    foreach ($changePassHeaders as $header) {
+        if (preg_match('/^Location:\s*(.+)/i', $header, $m)) $changePassRedirect = trim($m[1]);
     }
     // Only consider it present if status is 200 OK or 3xx Redirect (strictly less than 400)
     if ($changePassStatus >= 200 && $changePassStatus < 400) {
@@ -2415,6 +2440,7 @@ else { header("Access-Control-Allow-Origin: https://periscope.run"); }
 header("Access-Control-Allow-Methods: GET, POST");
 header('Content-Type: application/json');
 
+handle_actions:
 $action = $_GET['action'] ?? '';
 if ($action === 'check_status') {
     $info = ['has_db' => ($pdo !== null), 'plugin_version' => PERISCOPE_VERSION];
