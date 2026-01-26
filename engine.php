@@ -158,7 +158,12 @@ $pdo = null;
 try {
     $pdo = new PDO('sqlite:' . $db_path);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->exec("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL, timestamp INTEGER NOT NULL, data TEXT NOT NULL)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL, timestamp INTEGER NOT NULL, data TEXT NOT NULL, filters TEXT DEFAULT '')");
+    // Migration: add filters column if it doesn't exist (for existing databases)
+    $cols = $pdo->query("PRAGMA table_info(history)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('filters', $cols)) {
+        $pdo->exec("ALTER TABLE history ADD COLUMN filters TEXT DEFAULT ''");
+    }
 } catch (Exception $e) {}
 
 // --- HELPER FUNCTIONS ---
@@ -178,6 +183,58 @@ function formatDate($raw) {
         $dt->setTimezone(new DateTimeZone('UTC'));
         return $dt->format('M j, Y, g:i a') . ' UTC';
     } catch (Exception $e) { return $raw; }
+}
+
+function buildFiltersJson($data) {
+    if (!$data || !is_array($data)) return '';
+    
+    $filters = [];
+    
+    // Domain exists
+    $filters['exists'] = !isset($data['domain_exists']) || $data['domain_exists'] !== false;
+    
+    // Hidden from search engines
+    $filters['blocked'] = isset($data['indexability']['blocked']) && $data['indexability']['blocked'] === true;
+    
+    // Platform/CMS
+    $filters['platform'] = isset($data['cms']['name']) ? $data['cms']['name'] : null;
+    
+    // Hosting provider
+    $filters['host'] = isset($data['infrastructure']['host']) ? $data['infrastructure']['host'] : null;
+    
+    // CDN
+    $filters['cdn'] = isset($data['infrastructure']['cdn']) ? $data['infrastructure']['cdn'] : null;
+    
+    // Server software
+    $filters['server'] = isset($data['infrastructure']['server']) ? $data['infrastructure']['server'] : null;
+    
+    // SSL issuer
+    $filters['ssl_issuer'] = isset($data['ssl']['issuer']) ? $data['ssl']['issuer'] : null;
+    
+    // SSL valid
+    $filters['ssl_valid'] = isset($data['ssl']['valid']) ? $data['ssl']['valid'] === true : null;
+    
+    // HTTP status code
+    $filters['status'] = isset($data['request']['status_code']) ? (int)$data['request']['status_code'] : null;
+    
+    // IPv6 support (check for AAAA records)
+    $filters['ipv6'] = false;
+    if (isset($data['dns_records']) && is_array($data['dns_records'])) {
+        foreach ($data['dns_records'] as $rec) {
+            if (isset($rec['type']) && $rec['type'] === 'AAAA') {
+                $filters['ipv6'] = true;
+                break;
+            }
+        }
+    }
+    
+    // Has sitemap
+    $filters['has_sitemap'] = isset($data['metadata']['sitemap']['present']) && $data['metadata']['sitemap']['present'] === true;
+    
+    // Has robots.txt
+    $filters['has_robots'] = isset($data['metadata']['robots_txt']['present']) && $data['metadata']['robots_txt']['present'] === true;
+    
+    return json_encode($filters);
 }
 
 // --- INPUT NORMALIZATION ---
@@ -228,7 +285,7 @@ function getScanPath($domain, $timestamp) {
     return getenv('HOME') . "/.periscope/scans/$domain/$timestamp";
 }
 
-function saveRawFiles($path, $html, $headers, $whoisDomain, $whoisIps, $ssl, $dns, $rdap = null, $metadata_files = [], $redirectChain = null, $ptrRecords = null) {
+function saveRawFiles($path, $html, $headers, $whoisDomain, $whoisIps, $ssl, $dns, $rdap = null, $metadata_files = [], $redirectChain = null, $ptrRecords = null, $connectionInfo = null) {
     // SAFETY: Ensure path is within expected directory
     $expectedBase = getenv('HOME') . "/.periscope/scans/";
     if (empty($path) || strpos(realpath(dirname($path)) ?: $path, $expectedBase) !== 0) {
@@ -256,7 +313,20 @@ function saveRawFiles($path, $html, $headers, $whoisDomain, $whoisIps, $ssl, $dn
     if (!empty($metadata_files['browserconfig'])) file_put_contents("$path/browserconfig.xml", $metadata_files['browserconfig']);
     if (!empty($metadata_files['keybase_txt'])) file_put_contents("$path/keybase.txt", $metadata_files['keybase_txt']);
     if (!empty($metadata_files['favicon'])) file_put_contents("$path/favicon.ico", $metadata_files['favicon']);
-    if ($redirectChain && count($redirectChain) > 0) file_put_contents("$path/redirects.json", json_encode($redirectChain));
+    // Save redirect chain with connection info merged into final hop
+    if ($redirectChain && count($redirectChain) > 0) {
+        // Merge connection info (protocol, timing) into final redirect entry
+        if ($connectionInfo && !empty($redirectChain)) {
+            $lastIndex = count($redirectChain) - 1;
+            if (isset($connectionInfo['http_version'])) {
+                $redirectChain[$lastIndex]['protocol'] = $connectionInfo['http_version'];
+            }
+            if (isset($connectionInfo['timing'])) {
+                $redirectChain[$lastIndex]['timing'] = $connectionInfo['timing'];
+            }
+        }
+        file_put_contents("$path/redirects.json", json_encode($redirectChain));
+    }
     if ($ptrRecords && count($ptrRecords) > 0) file_put_contents("$path/ptr_records.json", json_encode($ptrRecords));
 }
 
@@ -1988,6 +2058,19 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
     $metadata = detectMetadata($domain, $html, $metadataRawFiles);
     $robotsTxtContent = $raw['robots_txt'] ?? ($metadataRawFiles['robots_txt'] ?? null);
 
+    // Build request info from redirect chain (if available)
+    $redirectChain = $raw['redirect_chain'] ?? [];
+    $finalHop = !empty($redirectChain) ? end($redirectChain) : null;
+    $requestInfo = $finalHop ? [
+        'url' => $finalHop['url'] ?? "https://$domain",
+        'method' => 'GET',
+        'status_code' => $finalHop['status_code'] ?? null,
+        'status_text' => $finalHop['status_text'] ?? null,
+        'remote_address' => $finalHop['remote_address'] ?? null,
+        'protocol' => $finalHop['protocol'] ?? null,
+        'timing' => $finalHop['timing'] ?? null
+    ] : null;
+
     $data = [
         'target_host' => $targetHost,
         'root_domain' => $rootDomain,
@@ -1998,12 +2081,14 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
         'ip_lookup' => $ip_lookup,
         'ptr_records' => $ptr_records,
         'http_headers' => $headers,
+        'request' => $requestInfo,
         'ssl' => getSSLInfo($domain, $rawSsl),
         'cms' => detectCMS($domain, $html, $headers),
         'infrastructure' => detectInfrastructure($headers),
         'security' => detectSecurityHeaders($headers),
         'technology' => detectTechnology($html, $headers),
         'metadata' => $metadata,
+        'redirect_chain' => $redirectChain,
         'indexability' => detectSearchEngineBlocking($html, $headers, $robotsTxtContent),
         'errors' => [],
         'raw_available' => true,
@@ -2014,6 +2099,14 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
     if ($saveCache && $timestamp) {
         $path = getScanPath($domain, $timestamp);
         saveResponseCache($path, $data);
+        
+        // Update filters column in database if exists
+        global $pdo;
+        if ($pdo) {
+            $filters = buildFiltersJson($data);
+            $stmt = $pdo->prepare("UPDATE history SET filters = ? WHERE domain = ? AND timestamp = ? AND (filters = '' OR filters IS NULL)");
+            $stmt->execute([$filters, $domain, $timestamp]);
+        }
     }
 
     return $data;
@@ -2142,8 +2235,9 @@ function performLookup($domain, $options = []) {
         if (!is_dir($scanPath)) mkdir($scanPath, 0755, true);
         saveResponseCache($scanPath, $result);
         if ($saveDB && $pdo) {
-            $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')");
-            $stmt->execute([$targetHost, $timestamp]);
+            $filters = buildFiltersJson($result);
+            $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data, filters) VALUES (?, ?, '', ?)");
+            $stmt->execute([$targetHost, $timestamp, $filters]);
         }
         return $result;
     }
@@ -2357,7 +2451,7 @@ function performLookup($domain, $options = []) {
     $scanPath = getScanPath($targetHost, $timestamp);
     saveRawFiles($scanPath, $html, $headers, $rawWhoisDomain, $rawWhoisIps, $rawSsl, [
         'records' => $dns_records, 'zone' => $zoneFile
-    ], $rawRdap, $metadataRawFiles, $redirectChain, $ptrRecords);
+    ], $rawRdap, $metadataRawFiles, $redirectChain, $ptrRecords, $connectionInfo);
 
     $domainData = $rawRdap ? parseRdap($rawRdap) : [];
     if (empty($domainData)) $domainData = parseRawWhois($rawWhoisDomain);
@@ -2390,8 +2484,9 @@ function performLookup($domain, $options = []) {
     saveResponseCache($scanPath, $result);
 
     if ($saveDB && $pdo) {
-        $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')");
-        $stmt->execute([$targetHost, $timestamp]);
+        $filters = buildFiltersJson($result);
+        $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data, filters) VALUES (?, ?, '', ?)");
+        $stmt->execute([$targetHost, $timestamp, $filters]);
     }
 
     $progressDone('Scan complete');
@@ -2538,6 +2633,7 @@ if ($pdo) {
         $existence = isset($_GET['existence']) ? $_GET['existence'] : 'all';
         $platform = isset($_GET['platform']) ? $_GET['platform'] : 'all';
         $scanCount = isset($_GET['scan_count']) ? $_GET['scan_count'] : 'all';
+        $indexability = isset($_GET['indexability']) ? $_GET['indexability'] : 'all';
 
         // Build dynamic query with filters
         $where = [];
@@ -2548,9 +2644,23 @@ if ($pdo) {
             $params[] = '%' . $search . '%';
         }
 
-        // For existence and platform filters, we need to check raw files or cache
-        // This requires a subquery or post-processing since data isn't in the main table
-        $needsDataFilter = ($existence !== 'all' || $platform !== 'all');
+        // Apply filters via SQL pattern matching on the filters column
+        if ($existence === 'exists') {
+            $where[] = "(filters LIKE '%\"exists\":true%' OR filters = '')";
+        } elseif ($existence === 'nonexistent') {
+            $where[] = "filters LIKE '%\"exists\":false%'";
+        }
+
+        if ($indexability === 'hidden') {
+            $where[] = "filters LIKE '%\"blocked\":true%'";
+        } elseif ($indexability === 'indexable') {
+            $where[] = "(filters LIKE '%\"blocked\":false%' OR filters = '')";
+        }
+
+        if ($platform !== 'all') {
+            $where[] = "filters LIKE ?";
+            $params[] = '%"platform":"' . $platform . '"%';
+        }
 
         // For scan count filter, use a subquery
         $havingScanCount = '';
@@ -2599,55 +2709,19 @@ if ($pdo) {
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Post-filter for existence and platform if needed
-        if ($needsDataFilter) {
-            $filtered = [];
-            foreach ($rows as $row) {
-                $path = getScanPath($row['domain'], $row['timestamp']);
-                $cache = loadResponseCache($path);
-                $data = $cache ? $cache['data'] : null;
-
-                // If no cache, try to load from raw files (expensive but necessary)
-                if (!$data) {
-                    $raw = loadRawFiles($path);
-                    if (!empty($raw)) {
-                        $data = computeFromRaw($raw, $row['domain'], $row['timestamp'], true);
-                    }
-                }
-
-                // Apply existence filter
-                if ($existence !== 'all') {
-                    $domainExists = !isset($data['domain_exists']) || $data['domain_exists'] !== false;
-                    if ($existence === 'exists' && !$domainExists) continue;
-                    if ($existence === 'nonexistent' && $domainExists) continue;
-                }
-
-                // Apply platform filter
-                if ($platform !== 'all') {
-                    $cmsName = isset($data['cms']['name']) ? $data['cms']['name'] : null;
-                    if ($cmsName !== $platform) continue;
-                }
-
-                $filtered[] = $row;
-            }
-            $rows = $filtered;
-            $total = count($rows); // Approximate - full count would require scanning all records
-        }
-
         echo json_encode(['items' => $rows, 'total' => $total, 'offset' => $offset, 'limit' => $limit]);
         exit;
     }
     if ($action === 'get_platforms') {
-        // Get distinct platforms from cached scan data
+        // Get distinct platforms from filters column
         $platforms = [];
-        $stmt = $pdo->query("SELECT DISTINCT domain, timestamp FROM history ORDER BY timestamp DESC LIMIT 500");
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt = $pdo->query("SELECT DISTINCT filters FROM history WHERE filters != '' AND filters LIKE '%\"platform\":%'");
+        $rows = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
-        foreach ($rows as $row) {
-            $path = getScanPath($row['domain'], $row['timestamp']);
-            $cache = loadResponseCache($path);
-            if ($cache && isset($cache['data']['cms']['name']) && $cache['data']['cms']['name']) {
-                $platforms[$cache['data']['cms']['name']] = true;
+        foreach ($rows as $filtersJson) {
+            $filters = json_decode($filtersJson, true);
+            if ($filters && isset($filters['platform']) && $filters['platform']) {
+                $platforms[$filters['platform']] = true;
             }
         }
 
@@ -2722,13 +2796,36 @@ if ($pdo) {
         echo json_encode($options);
         exit;
     }
+    if ($action === 'rebuild_filters') {
+        // Rebuild filters column for all history entries from cached scan data
+        $stmt = $pdo->query("SELECT id, domain, timestamp FROM history WHERE filters = '' OR filters IS NULL");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $updated = 0;
+        $updateStmt = $pdo->prepare("UPDATE history SET filters = ? WHERE id = ?");
+        
+        foreach ($rows as $row) {
+            $path = getScanPath($row['domain'], $row['timestamp']);
+            $cache = loadResponseCache($path);
+            $data = $cache ? $cache['data'] : null;
+            
+            if ($data) {
+                $filters = buildFiltersJson($data);
+                $updateStmt->execute([$filters, $row['id']]);
+                $updated++;
+            }
+        }
+        
+        echo json_encode(['success' => true, 'updated' => $updated, 'total' => count($rows)]);
+        exit;
+    }
     if ($action === 'get_domain_versions') {
         $stmt = $pdo->prepare("SELECT id, domain, timestamp FROM history WHERE domain = ? ORDER BY timestamp DESC");
         $stmt->execute([$_GET['domain']]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC)); exit;
     }
     if ($action === 'get_history_item') {
-        $stmt = $pdo->prepare("SELECT domain, data, timestamp FROM history WHERE id = ?");
+        $stmt = $pdo->prepare("SELECT id, domain, data, timestamp, filters FROM history WHERE id = ?");
         $stmt->execute([$_GET['id']]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if($row) {
@@ -2740,6 +2837,15 @@ if ($pdo) {
                 $data['timestamp'] = $row['timestamp'];
                 $data['raw_available'] = false;  // Flag for UI
                 $data['cache_status'] = 'legacy';
+
+                // Backfill filters column if empty (for old v1.3 captures)
+                if (empty($row['filters'])) {
+                    $filters = buildFiltersJson($data);
+                    if ($filters) {
+                        $updateStmt = $pdo->prepare("UPDATE history SET filters = ? WHERE id = ?");
+                        $updateStmt->execute([$filters, $row['id']]);
+                    }
+                }
             } else {
                 // New scan - try cached response first
                 $path = getScanPath($row['domain'], $row['timestamp']);
@@ -2750,8 +2856,65 @@ if ($pdo) {
                     $data = $cache['data'];
                     $data['timestamp'] = $row['timestamp'];
                     $data['cache_status'] = 'hit';
+
+                    // Backfill redirects.json if cache has request data that raw files are missing
+                    if (isset($data['request']) && ($data['request']['timing'] || $data['request']['protocol'])) {
+                        $redirectsFile = "$path/redirects.json";
+                        if (file_exists($redirectsFile)) {
+                            $redirects = @json_decode(file_get_contents($redirectsFile), true);
+                            if ($redirects && count($redirects) > 0) {
+                                $lastIdx = count($redirects) - 1;
+                                $needsUpdate = false;
+                                if ($data['request']['timing'] && !isset($redirects[$lastIdx]['timing'])) {
+                                    $redirects[$lastIdx]['timing'] = $data['request']['timing'];
+                                    $needsUpdate = true;
+                                }
+                                if ($data['request']['protocol'] && !isset($redirects[$lastIdx]['protocol'])) {
+                                    $redirects[$lastIdx]['protocol'] = $data['request']['protocol'];
+                                    $needsUpdate = true;
+                                }
+                                if ($data['request']['remote_address'] && !isset($redirects[$lastIdx]['remote_address'])) {
+                                    $redirects[$lastIdx]['remote_address'] = $data['request']['remote_address'];
+                                    $needsUpdate = true;
+                                }
+                                if ($needsUpdate) {
+                                    file_put_contents($redirectsFile, json_encode($redirects));
+                                }
+                            }
+                        }
+                    }
                 } else {
-                    // Cache miss or outdated - compute from raw files
+                    // Cache miss or outdated - backfill redirects.json from old cache BEFORE regenerating
+                    if ($cache && isset($cache['data']['request'])) {
+                        $oldRequest = $cache['data']['request'];
+                        if ($oldRequest['timing'] || $oldRequest['protocol'] || $oldRequest['remote_address']) {
+                            $redirectsFile = "$path/redirects.json";
+                            if (file_exists($redirectsFile)) {
+                                $redirects = @json_decode(file_get_contents($redirectsFile), true);
+                                if ($redirects && count($redirects) > 0) {
+                                    $lastIdx = count($redirects) - 1;
+                                    $needsUpdate = false;
+                                    if ($oldRequest['timing'] && !isset($redirects[$lastIdx]['timing'])) {
+                                        $redirects[$lastIdx]['timing'] = $oldRequest['timing'];
+                                        $needsUpdate = true;
+                                    }
+                                    if ($oldRequest['protocol'] && !isset($redirects[$lastIdx]['protocol'])) {
+                                        $redirects[$lastIdx]['protocol'] = $oldRequest['protocol'];
+                                        $needsUpdate = true;
+                                    }
+                                    if ($oldRequest['remote_address'] && !isset($redirects[$lastIdx]['remote_address'])) {
+                                        $redirects[$lastIdx]['remote_address'] = $oldRequest['remote_address'];
+                                        $needsUpdate = true;
+                                    }
+                                    if ($needsUpdate) {
+                                        file_put_contents($redirectsFile, json_encode($redirects));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Now compute from raw files (which now have the backfilled data)
                     $raw = loadRawFiles($path);
                     $data = computeFromRaw($raw, $row['domain'], $row['timestamp'], true);
                     $data['timestamp'] = $row['timestamp'];
@@ -2778,9 +2941,9 @@ if ($pdo) {
         }
         // Use timestamp from data (set by performLookup) to match raw files folder
         $timestamp = isset($in['data']['timestamp']) ? $in['data']['timestamp'] : time();
-        // Insert with empty data - raw files already stored by performLookup
-        $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (?, ?, '')")
-            ->execute([$in['domain'], $timestamp]);
+        $filters = isset($in['data']) ? buildFiltersJson($in['data']) : '';
+        $pdo->prepare("INSERT INTO history (domain, timestamp, data, filters) VALUES (?, ?, '', ?)")
+            ->execute([$in['domain'], $timestamp, $filters]);
         echo json_encode(['success' => true]);
         exit;
     }
@@ -2912,8 +3075,11 @@ if ($pdo) {
             $json = file_get_contents($_FILES['importFile']['tmp_name']);
             $data = json_decode($json, true);
             if (is_array($data)) {
-                $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data) VALUES (:d, :t, :v)");
-                foreach($data as $i) $stmt->execute([':d'=>$i['domain'], ':t'=>$i['timestamp'], ':v'=>json_encode($i['data'])]);
+                $stmt = $pdo->prepare("INSERT INTO history (domain, timestamp, data, filters) VALUES (:d, :t, :v, :f)");
+                foreach($data as $i) {
+                    $filters = isset($i['data']) ? buildFiltersJson($i['data']) : '';
+                    $stmt->execute([':d'=>$i['domain'], ':t'=>$i['timestamp'], ':v'=>json_encode($i['data']), ':f'=>$filters]);
+                }
                 echo json_encode(['success'=>true, 'count'=>count($data)]);
             }
         }
@@ -3030,6 +3196,38 @@ if ($pdo) {
             exit;
         }
         $path = getScanPath($row['domain'], $row['timestamp']);
+
+        // Backfill redirects.json from old cache BEFORE regenerating
+        $cache = loadResponseCache($path);
+        if ($cache && isset($cache['data']['request'])) {
+            $oldRequest = $cache['data']['request'];
+            if ($oldRequest['timing'] || $oldRequest['protocol'] || $oldRequest['remote_address']) {
+                $redirectsFile = "$path/redirects.json";
+                if (file_exists($redirectsFile)) {
+                    $redirects = @json_decode(file_get_contents($redirectsFile), true);
+                    if ($redirects && count($redirects) > 0) {
+                        $lastIdx = count($redirects) - 1;
+                        $needsUpdate = false;
+                        if ($oldRequest['timing'] && !isset($redirects[$lastIdx]['timing'])) {
+                            $redirects[$lastIdx]['timing'] = $oldRequest['timing'];
+                            $needsUpdate = true;
+                        }
+                        if ($oldRequest['protocol'] && !isset($redirects[$lastIdx]['protocol'])) {
+                            $redirects[$lastIdx]['protocol'] = $oldRequest['protocol'];
+                            $needsUpdate = true;
+                        }
+                        if ($oldRequest['remote_address'] && !isset($redirects[$lastIdx]['remote_address'])) {
+                            $redirects[$lastIdx]['remote_address'] = $oldRequest['remote_address'];
+                            $needsUpdate = true;
+                        }
+                        if ($needsUpdate) {
+                            file_put_contents($redirectsFile, json_encode($redirects));
+                        }
+                    }
+                }
+            }
+        }
+
         $raw = loadRawFiles($path);
         $data = computeFromRaw($raw, $row['domain'], $row['timestamp'], true);
         $data['timestamp'] = $row['timestamp'];
@@ -3074,8 +3272,38 @@ if ($pdo) {
             
             $oldVersion = $cache['plugin_version'] ?? 'none';
             echo "[$num/$total] Upgrading $domain ($oldVersion -> " . PERISCOPE_VERSION . ")...";
-            
+
             try {
+                // Backfill redirects.json from old cache BEFORE regenerating
+                if ($cache && isset($cache['data']['request'])) {
+                    $oldRequest = $cache['data']['request'];
+                    if ($oldRequest['timing'] || $oldRequest['protocol'] || $oldRequest['remote_address']) {
+                        $redirectsFile = "$path/redirects.json";
+                        if (file_exists($redirectsFile)) {
+                            $redirects = @json_decode(file_get_contents($redirectsFile), true);
+                            if ($redirects && count($redirects) > 0) {
+                                $lastIdx = count($redirects) - 1;
+                                $needsUpdate = false;
+                                if ($oldRequest['timing'] && !isset($redirects[$lastIdx]['timing'])) {
+                                    $redirects[$lastIdx]['timing'] = $oldRequest['timing'];
+                                    $needsUpdate = true;
+                                }
+                                if ($oldRequest['protocol'] && !isset($redirects[$lastIdx]['protocol'])) {
+                                    $redirects[$lastIdx]['protocol'] = $oldRequest['protocol'];
+                                    $needsUpdate = true;
+                                }
+                                if ($oldRequest['remote_address'] && !isset($redirects[$lastIdx]['remote_address'])) {
+                                    $redirects[$lastIdx]['remote_address'] = $oldRequest['remote_address'];
+                                    $needsUpdate = true;
+                                }
+                                if ($needsUpdate) {
+                                    file_put_contents($redirectsFile, json_encode($redirects));
+                                }
+                            }
+                        }
+                    }
+                }
+
                 $raw = loadRawFiles($path);
                 $data = computeFromRaw($raw, $domain, $timestamp, true);
                 echo " done\n";

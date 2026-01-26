@@ -1365,7 +1365,13 @@
                                 <option value="all">Any # Scans</option>
                                 <option v-for="opt in scanCountOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                             </select>
-                            <button v-if="historyFilters.existence !== 'all' || historyFilters.platform !== 'all' || historyFilters.scanCount !== 'all'"
+                            <select v-model="historyFilters.indexability" @change="applyHistoryFilters"
+                                class="text-xs bg-slate-100 dark:bg-slate-800 border-0 rounded-lg text-slate-700 dark:text-slate-300 py-1.5 px-2 focus:ring-2 focus:ring-cyan-500">
+                                <option value="all">Any Indexability</option>
+                                <option value="indexable">Indexable</option>
+                                <option value="hidden">Hidden from Search</option>
+                            </select>
+                            <button v-if="historyFilters.existence !== 'all' || historyFilters.platform !== 'all' || historyFilters.scanCount !== 'all' || historyFilters.indexability !== 'all'"
                                 @click="clearHistoryFilters"
                                 class="text-xs text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400 py-1.5 px-2">
                                 <span class="mdi mdi-close"></span> Clear
@@ -1393,7 +1399,7 @@
                         </ul>
                         <div v-else class="text-center py-12"><span
                                 class="mdi mdi-history text-5xl text-slate-200 dark:text-slate-700"></span>
-                            <p class="mt-2 text-slate-500">{{ historySearch || historyFilters.existence !== 'all' || historyFilters.platform !== 'all' || historyFilters.scanCount !== 'all' ? 'No matches found' : 'Log empty' }}</p>
+                            <p class="mt-2 text-slate-500">{{ historySearch || historyFilters.existence !== 'all' || historyFilters.platform !== 'all' || historyFilters.scanCount !== 'all' || historyFilters.indexability !== 'all' ? 'No matches found' : 'Log empty' }}</p>
                         </div>
                     </div>
                     <div v-if="historyItems.length > 0 && historyItems.length < historyTotal"
@@ -1783,7 +1789,7 @@
                     response: { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} },
                     currentTheme: localStorage.getItem('theme') || (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
                     showHistoryModal: false, historyItems: [], historyTotal: 0, historySearch: '', showVersionsModal: false, domainVersions: [], showAutocomplete: false, autocompleteSuggestions: [], autocompleteTimeout: null,
-                    historyFilters: { existence: 'all', platform: 'all', scanCount: 'all' },
+                    historyFilters: { existence: 'all', platform: 'all', scanCount: 'all', indexability: 'all' },
                     availablePlatforms: [],
                     scanCountOptions: [],
                     snackbar: { show: false, message: "" },
@@ -1814,7 +1820,7 @@
                     if (val) {
                         this.selectedHistoryIndex = -1;
                         this.historySearch = '';
-                        this.historyFilters = { existence: 'all', platform: 'all', scanCount: 'all' };
+                        this.historyFilters = { existence: 'all', platform: 'all', scanCount: 'all', indexability: 'all' };
                         this.loadHistory();
                         this.loadAvailablePlatforms();
                         this.loadScanCountOptions();
@@ -1881,6 +1887,7 @@
                     if (this.historyFilters.existence !== 'all') count++;
                     if (this.historyFilters.platform !== 'all') count++;
                     if (this.historyFilters.scanCount !== 'all') count++;
+                    if (this.historyFilters.indexability !== 'all') count++;
                     return count;
                 },
                 isCrossDomainRedirect() {
@@ -2728,6 +2735,7 @@
                         if (this.historyFilters.existence !== 'all') params += `&existence=${this.historyFilters.existence}`;
                         if (this.historyFilters.platform !== 'all') params += `&platform=${encodeURIComponent(this.historyFilters.platform)}`;
                         if (this.historyFilters.scanCount !== 'all') params += `&scan_count=${encodeURIComponent(this.historyFilters.scanCount)}`;
+                        if (this.historyFilters.indexability !== 'all') params += `&indexability=${encodeURIComponent(this.historyFilters.indexability)}`;
                         return fetch(this.getUrl(params))
                             .then(r => r.json())
                             .then(data => {
@@ -2763,6 +2771,15 @@
                                 items = items.filter(i => {
                                     const count = domainCounts[i.domain];
                                     return this.matchesScanCountFilter(count, filterValue);
+                                });
+                            }
+                            // Apply indexability filter
+                            if (this.historyFilters.indexability !== 'all') {
+                                items = items.filter(i => {
+                                    const blocked = i.data && i.data.indexability && i.data.indexability.blocked;
+                                    if (this.historyFilters.indexability === 'hidden') return blocked === true;
+                                    if (this.historyFilters.indexability === 'indexable') return blocked !== true;
+                                    return true;
                                 });
                             }
                             this.historyItems = items;
@@ -2881,7 +2898,7 @@
                     this.loadHistory(false);
                 },
                 clearHistoryFilters() {
-                    this.historyFilters = { existence: 'all', platform: 'all', scanCount: 'all' };
+                    this.historyFilters = { existence: 'all', platform: 'all', scanCount: 'all', indexability: 'all' };
                     this.loadHistory(false);
                 },
                 searchHistory() {
