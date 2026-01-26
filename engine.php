@@ -601,6 +601,7 @@ function getHttpStatusText($code) {
 function getRedirectChain($url, $maxRedirects = 10) {
     $chain = [];
     $currentUrl = $url;
+    $connectionInfo = null;
 
     for ($i = 0; $i < $maxRedirects; $i++) {
         $ch = curl_init($currentUrl);
@@ -614,6 +615,15 @@ function getRedirectChain($url, $maxRedirects = 10) {
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        // Capture connection info from the final request
+        $remoteIp = curl_getinfo($ch, CURLINFO_PRIMARY_IP);
+        $remotePort = curl_getinfo($ch, CURLINFO_PRIMARY_PORT);
+        $totalTime = curl_getinfo($ch, CURLINFO_TOTAL_TIME);
+        $connectTime = curl_getinfo($ch, CURLINFO_CONNECT_TIME);
+        $dnsTime = curl_getinfo($ch, CURLINFO_NAMELOOKUP_TIME);
+        $httpVersion = curl_getinfo($ch, CURLINFO_HTTP_VERSION);
+
         curl_close($ch);
 
         // Skip if we got no response
@@ -622,7 +632,21 @@ function getRedirectChain($url, $maxRedirects = 10) {
         $chain[] = [
             'url' => $currentUrl,
             'status_code' => $httpCode,
-            'status_text' => getHttpStatusText($httpCode)
+            'status_text' => getHttpStatusText($httpCode),
+            'remote_address' => $remoteIp ? ($remoteIp . ($remotePort ? ':' . $remotePort : '')) : null
+        ];
+
+        // Update connection info (will reflect the final hop)
+        $connectionInfo = [
+            'remote_ip' => $remoteIp ?: null,
+            'remote_port' => $remotePort ?: null,
+            'remote_address' => $remoteIp ? ($remoteIp . ($remotePort ? ':' . $remotePort : '')) : null,
+            'http_version' => $httpVersion ? getHttpVersionString($httpVersion) : null,
+            'timing' => [
+                'dns_lookup' => round($dnsTime * 1000, 2),
+                'connect' => round($connectTime * 1000, 2),
+                'total' => round($totalTime * 1000, 2)
+            ]
         ];
 
         // Check for redirect (3xx status codes)
@@ -643,7 +667,21 @@ function getRedirectChain($url, $maxRedirects = 10) {
         break; // No redirect, we're done
     }
 
-    return $chain;
+    return ['chain' => $chain, 'connection' => $connectionInfo];
+}
+
+function getHttpVersionString($version) {
+    $versions = [
+        CURL_HTTP_VERSION_1_0 => 'HTTP/1.0',
+        CURL_HTTP_VERSION_1_1 => 'HTTP/1.1',
+        CURL_HTTP_VERSION_2_0 => 'HTTP/2',
+        CURL_HTTP_VERSION_2 => 'HTTP/2',
+    ];
+    // CURL_HTTP_VERSION_3 may not exist in older PHP versions
+    if (defined('CURL_HTTP_VERSION_3') && $version === CURL_HTTP_VERSION_3) {
+        return 'HTTP/3';
+    }
+    return $versions[$version] ?? 'HTTP/1.1';
 }
 
 function getSSLInfo($domain, $rawOutput = null) {
@@ -749,7 +787,25 @@ function detectCMS($domain, $html = null, $headers = []) {
     }
 
     // Squarespace
-    if (preg_match('/squarespace\.com|static\.squarespace/i', $html)) {
+    // Look for actual Squarespace CMS markers, not just text mentions
+    $is_squarespace = false;
+
+    // 1. Static resources from Squarespace CDN in src/href attributes
+    if (preg_match('/(src|href)=["\'][^"\']*static\d*\.squarespace\.com/i', $html)) $is_squarespace = true;
+
+    // 2. Squarespace-specific data attributes
+    if (!$is_squarespace && preg_match('/data-squarespace-cacheversion/i', $html)) $is_squarespace = true;
+
+    // 3. Squarespace meta tags (squarespace: namespace)
+    if (!$is_squarespace && preg_match('/<meta[^>]+property=["\']squarespace:/i', $html)) $is_squarespace = true;
+
+    // 4. Squarespace JavaScript globals/initialization
+    if (!$is_squarespace && preg_match('/Static\.SQUARESPACE_CONTEXT|Squarespace\.afterBodyLoad/i', $html)) $is_squarespace = true;
+
+    // 5. sqs- class prefix (Squarespace's common pattern)
+    if (!$is_squarespace && preg_match('/class=["\'][^"\']*\bsqs-/i', $html)) $is_squarespace = true;
+
+    if ($is_squarespace) {
         return ['name' => 'Squarespace', 'version' => null];
     }
 
@@ -2077,7 +2133,7 @@ function performLookup($domain, $options = []) {
         $result = [
             'target_host' => $targetHost, 'root_domain' => $rootDomain, 'is_subdomain' => $isSubdomain,
             'domain_exists' => false, 'domain' => [], 'dns_records' => [], 'zone' => '',
-            'ip_lookup' => [], 'http_headers' => [], 'ssl' => [], 'cms' => [],
+            'ip_lookup' => [], 'http_headers' => [], 'request' => null, 'ssl' => [], 'cms' => [],
             'infrastructure' => [], 'security' => [], 'technology' => [], 'metadata' => [],
             'redirect_chain' => [], 'indexability' => [], 'errors' => [],
             'timestamp' => $timestamp, 'raw_available' => false, 'plugin_version' => PERISCOPE_VERSION
@@ -2211,25 +2267,71 @@ function performLookup($domain, $options = []) {
 
     // Phase 5: HTTP & SSL
     $progress('Fetching HTTP headers & SSL...');
-    $redirectChain = getRedirectChain("https://" . $targetHost);
+    $redirectResult = getRedirectChain("https://" . $targetHost);
+    $redirectChain = $redirectResult['chain'];
+    $connectionInfo = $redirectResult['connection'];
     if (empty($redirectChain) || (count($redirectChain) === 1 && $redirectChain[0]['status_code'] === 0)) {
-        $redirectChain = getRedirectChain("http://" . $targetHost);
+        $redirectResult = getRedirectChain("http://" . $targetHost);
+        $redirectChain = $redirectResult['chain'];
+        $connectionInfo = $redirectResult['connection'];
     }
+
+    // Browser-like User-Agent for requests that may be blocked by bot detection
+    $browserUA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
     $headers = [];
-    $h_out = shell_exec("curl -I -s -L --max-time 3 " . escapeshellarg("https://".$targetHost));
-    if (!$h_out) $h_out = shell_exec("curl -I -s -L --max-time 2 " . escapeshellarg("http://".$targetHost));
-    if($h_out) foreach(explode("\n", $h_out) as $line) {
-        if(strpos($line, ':')) { [$k, $v] = explode(':', $line, 2); $headers[trim($k)] = trim($v); }
+    $httpStatus = 0;
+    $h_out = shell_exec("curl -I -s -L --max-time 3 -A " . escapeshellarg($browserUA) . " " . escapeshellarg("https://".$targetHost));
+    if (!$h_out) $h_out = shell_exec("curl -I -s -L --max-time 2 -A " . escapeshellarg($browserUA) . " " . escapeshellarg("http://".$targetHost));
+    if($h_out) {
+        foreach(explode("\n", $h_out) as $line) {
+            // Capture HTTP status from status line
+            if (preg_match('/^HTTP\/[\d.]+ (\d+)/', $line, $m)) {
+                $httpStatus = (int)$m[1];
+            }
+            if(strpos($line, ':')) { [$k, $v] = explode(':', $line, 2); $headers[trim($k)] = trim($v); }
+        }
     }
 
+    // Fetch HTML with browser-like headers
+    $browserHeaders = "User-Agent: $browserUA\r\n" .
+                      "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8\r\n" .
+                      "Accept-Language: en-US,en;q=0.5\r\n" .
+                      "Accept-Encoding: identity\r\n" .
+                      "Connection: keep-alive\r\n";
+
     $html = @file_get_contents("https://" . $targetHost, false, stream_context_create([
-        'http' => ['timeout' => 3, 'ignore_errors' => true],
+        'http' => ['timeout' => 5, 'ignore_errors' => true, 'header' => $browserHeaders],
         'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
     ]));
     if (!$html) $html = @file_get_contents("http://" . $targetHost, false, stream_context_create([
-        'http' => ['timeout' => 3, 'ignore_errors' => true]
+        'http' => ['timeout' => 5, 'ignore_errors' => true, 'header' => $browserHeaders]
     ]));
+
+    // Check if we got a 403 Forbidden - some hosts (like Squarespace) block non-browser requests
+    // Retry with curl which may handle cookies/redirects differently
+    $htmlStatus = 0;
+    if (isset($http_response_header)) {
+        foreach ($http_response_header as $h) {
+            if (preg_match('/^HTTP\/[\d.]+ (\d+)/', $h, $m)) {
+                $htmlStatus = (int)$m[1];
+            }
+        }
+    }
+
+    if ($htmlStatus === 403 || ($html && stripos($html, '<title>403') !== false)) {
+        // Retry with curl using full browser emulation
+        $curlHtml = shell_exec("curl -s -L --max-time 10 " .
+            "-A " . escapeshellarg($browserUA) . " " .
+            "-H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' " .
+            "-H 'Accept-Language: en-US,en;q=0.5' " .
+            "-H 'Cache-Control: no-cache' " .
+            "-H 'Pragma: no-cache' " .
+            escapeshellarg("https://".$targetHost) . " 2>/dev/null");
+        if ($curlHtml && strlen($curlHtml) > 100 && stripos($curlHtml, '<title>403') === false) {
+            $html = $curlHtml;
+        }
+    }
 
     $rawSsl = getRawSSL($targetHost);
     $progressDone('HTTP headers & SSL fetched');
@@ -2262,10 +2364,23 @@ function performLookup($domain, $options = []) {
 
     addMetadataStorageFlags($metadata, $metadataRawFiles);
 
+    // Build request info from final redirect chain entry and connection info
+    $finalHop = !empty($redirectChain) ? end($redirectChain) : null;
+    $requestInfo = [
+        'url' => $finalHop ? $finalHop['url'] : "https://$targetHost",
+        'method' => 'GET',
+        'status_code' => $finalHop ? $finalHop['status_code'] : null,
+        'status_text' => $finalHop ? $finalHop['status_text'] : null,
+        'remote_address' => $connectionInfo['remote_address'] ?? null,
+        'protocol' => $connectionInfo['http_version'] ?? null,
+        'timing' => $connectionInfo['timing'] ?? null
+    ];
+
     $result = [
         'target_host' => $targetHost, 'root_domain' => $rootDomain, 'is_subdomain' => $isSubdomain,
         'domain' => $domainData, 'dns_records' => $dns_records, 'zone' => $zoneFile,
         'ip_lookup' => $ip_lookup, 'ptr_records' => $ptrRecords, 'http_headers' => $headers,
+        'request' => $requestInfo,
         'ssl' => $ssl, 'cms' => $cms, 'infrastructure' => $infra, 'security' => $security,
         'technology' => $technology, 'metadata' => $metadata, 'redirect_chain' => $redirectChain,
         'indexability' => $indexability, 'errors' => [], 'timestamp' => $timestamp,
@@ -3122,7 +3237,7 @@ tailwind.config = {
                 <span class="bg-cyan-900/30 text-cyan-300 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold border border-cyan-800/50">Report</span>
             </div>
             <div class="text-sm text-slate-400">
-                <span class="mdi mdi-clock-outline mr-1"></span>' . $scanDate . '
+                <span class="mdi mdi-clock-outline mr-1"></span><span id="scan-date"></span>
             </div>
         </div>
     </div>
@@ -3519,9 +3634,39 @@ function render() {
         </div>`;
     }
     
+    // Request / Connection Info Bar (full width, above the grid)
+    if (data.request && (data.request.status_code || data.request.remote_address || data.request.timing)) {
+        const statusBadgeClass = data.request.status_code >= 200 && data.request.status_code < 300 ? "bg-emerald-900/40 text-emerald-400 border-emerald-800" :
+                                 data.request.status_code >= 300 && data.request.status_code < 400 ? "bg-amber-900/40 text-amber-400 border-amber-800" :
+                                 "bg-red-900/40 text-red-400 border-red-800";
+        const timingClass = data.request.timing?.total < 100 ? "bg-emerald-900/40 text-emerald-400 border-emerald-800" :
+                           data.request.timing?.total < 500 ? "bg-cyan-900/40 text-cyan-400 border-cyan-800" :
+                           data.request.timing?.total < 1000 ? "bg-amber-900/40 text-amber-400 border-amber-800" :
+                           "bg-red-900/40 text-red-400 border-red-800";
+        html += `<div class="mb-6 bg-slate-950/50 rounded-xl border border-slate-800 font-mono text-sm">
+            <div class="px-5 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+                ${data.request.status_code ? `<span class="px-2 py-0.5 rounded text-xs font-bold border ${statusBadgeClass}">${data.request.status_code} ${esc(data.request.status_text || "")}</span>` : ""}
+                ${data.request.protocol ? `<span class="text-slate-400">${esc(data.request.protocol)}</span>` : ""}
+                ${data.request.remote_address ? `<span class="text-slate-200">${esc(data.request.remote_address)}</span>` : ""}
+                ${data.request.timing?.total !== undefined ? `<div class="ml-auto relative group">
+                    <span class="px-2 py-0.5 rounded text-xs font-bold border cursor-help ${timingClass}"><span class="mdi mdi-clock-outline mr-1"></span>${data.request.timing.total}ms</span>
+                    <div class="absolute right-0 bottom-full mb-2 w-48 p-3 bg-slate-800 rounded-lg shadow-lg border border-slate-700 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
+                        <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Timing Breakdown</div>
+                        <div class="space-y-1.5 text-sm">
+                            <div class="flex justify-between"><span class="text-slate-400">DNS Lookup</span><span class="text-slate-200">${data.request.timing.dns_lookup || 0}ms</span></div>
+                            <div class="flex justify-between"><span class="text-slate-400">Connect</span><span class="text-slate-200">${data.request.timing.connect || 0}ms</span></div>
+                            <div class="flex justify-between pt-1.5 border-t border-slate-700"><span class="text-slate-300 font-medium">Total</span><span class="text-slate-100 font-bold">${data.request.timing.total}ms</span></div>
+                        </div>
+                        <div class="absolute right-4 -bottom-1.5 w-3 h-3 bg-slate-800 border-r border-b border-slate-700 transform rotate-45"></div>
+                    </div>
+                </div>` : ""}
+            </div>
+        </div>`;
+    }
+
     // Top cards row - SSL, Platform, Infrastructure
     html += `<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">`;
-    
+
     // SSL Certificate
     if (data.ssl && data.ssl.valid) {
         const s = data.ssl;
@@ -3539,7 +3684,7 @@ function render() {
             </div>
         </div>`;
     }
-    
+
     // Platform
     if (data.cms && data.cms.name) {
         html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
@@ -4001,11 +4146,19 @@ function render() {
     // BIND Zone File
     if (data.zone) {
         html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
-            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30 flex items-center justify-between">
                 <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider">BIND Zone File</h3>
+                <div class="flex items-center gap-2">
+                    <button onclick="copyZoneFile()" class="px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1.5">
+                        <span class="mdi mdi-content-copy"></span> Copy
+                    </button>
+                    <button onclick="downloadZoneFile()" class="px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1.5">
+                        <span class="mdi mdi-download"></span> Download
+                    </button>
+                </div>
             </div>
             <div class="p-4">
-                <pre class="text-xs font-mono text-slate-300 whitespace-pre-wrap break-all bg-slate-950 p-4 rounded-lg overflow-x-auto max-h-96">${esc(data.zone)}</pre>
+                <pre id="zone-file-content" class="text-xs font-mono whitespace-pre-wrap break-all bg-slate-950 p-4 rounded-lg overflow-x-auto max-h-96">${highlightZone(data.zone)}</pre>
             </div>
         </div>`;
     }
@@ -4016,12 +4169,74 @@ function render() {
     r.innerHTML = html;
 }
 
-function esc(s) { 
+function esc(s) {
     if (s === null || s === undefined) return "";
-    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); 
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function highlightZone(zone) {
+    if (!zone) return "";
+    return esc(zone).split("\\n").map(line => {
+        // Comments (lines starting with ;)
+        if (line.trim().startsWith(";")) {
+            return \'<span class="text-slate-500">\' + line + \'</span>\';
+        }
+        // Directives ($ORIGIN, $TTL)
+        if (line.trim().startsWith("$")) {
+            return line.replace(/^(\\$[A-Z]+)(\\s+)(.*)$/, \'<span class="text-purple-400">$1</span>$2<span class="text-cyan-400">$3</span>\');
+        }
+        // Record types - highlight type keywords
+        const recordTypes = ["SOA", "NS", "A", "AAAA", "CNAME", "MX", "TXT", "SRV", "PTR", "CAA", "HTTPS", "SVCB"];
+        let highlighted = line;
+        recordTypes.forEach(type => {
+            const regex = new RegExp("(\\\\s)(" + type + ")(\\\\s)", "g");
+            highlighted = highlighted.replace(regex, \'$1<span class="text-amber-400 font-semibold">$2</span>$3\');
+        });
+        // Highlight IN keyword
+        highlighted = highlighted.replace(/(\\s)(IN)(\\s)/g, \'$1<span class="text-slate-500">$2</span>$3\');
+        // Highlight @ symbol
+        highlighted = highlighted.replace(/^(@)/g, \'<span class="text-cyan-400 font-semibold">$1</span>\');
+        return \'<span class="text-slate-300">\' + highlighted + \'</span>\';
+    }).join("\\n");
+}
+
+function copyZoneFile() {
+    const text = data.zone;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target.closest("button");
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = \'<span class="mdi mdi-check"></span> Copied!\';
+        btn.classList.add("text-emerald-400");
+        setTimeout(() => {
+            btn.innerHTML = originalHTML;
+            btn.classList.remove("text-emerald-400");
+        }, 2000);
+    });
+}
+
+function downloadZoneFile() {
+    const blob = new Blob([data.zone], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = data.target_host + ".zone";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 render();
+
+// Format scan date in user\'s local timezone
+if (data.timestamp) {
+    const d = new Date(data.timestamp * 1000);
+    document.getElementById("scan-date").textContent = d.toLocaleDateString(undefined, {
+        year: "numeric", month: "short", day: "numeric"
+    }) + " at " + d.toLocaleTimeString(undefined, {
+        hour: "numeric", minute: "2-digit", hour12: true
+    });
+}
 </script>
 </body>
 </html>';
@@ -4049,6 +4264,8 @@ if (isset($_GET['scan'])) {
         echo json_encode(['error' => 'No domain provided']);
         exit;
     }
+
+    set_time_limit(0); // Disable execution time limit for long scans
 
     // Set SSE headers
     header('Content-Type: text/event-stream');
