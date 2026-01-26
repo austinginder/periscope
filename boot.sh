@@ -17,9 +17,13 @@ RAW_URL="https://raw.githubusercontent.com/austinginder/periscope/refs/heads/mai
 
 # --- Args ---
 LOCAL_MODE=false
-if [[ "$1" == "--local" ]]; then
-    LOCAL_MODE=true
-fi
+DEBUG_MODE=false
+for arg in "$@"; do
+    case "$arg" in
+        --local) LOCAL_MODE=true ;;
+        --debug) DEBUG_MODE=true ;;
+    esac
+done
 
 # --- Colors ---
 GREEN='\033[0;32m'
@@ -238,7 +242,13 @@ echo -e "${GREEN}💻 CLI Usage: php $ENGINE_FILE domain.com${NC}"
 echo -e "${GREEN}📂 Database:  $DB_FILE${NC}"
 echo ""
 
-PERISCOPE_DB="$DB_FILE" php -S 127.0.0.1:$PORT "$ROUTER_FILE"
+# Build and display launch command
+if [ "$DEBUG_MODE" = true ]; then
+    echo -e "${RED}🐛 Debug mode enabled - PHP errors will be displayed${NC}"
+    PERISCOPE_DB="$DB_FILE" PERISCOPE_DEBUG=1 php -S 127.0.0.1:$PORT "$ROUTER_FILE"
+else
+    PERISCOPE_DB="$DB_FILE" php -S 127.0.0.1:$PORT "$ROUTER_FILE"
+fi
 
 # Clean exit
 cleanup
