@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.4.0] - 2026-01-26
+
+### Added
+
+- **Response Info Bar** - New UI bar displaying HTTP status code (color-coded), protocol version (HTTP/1.1, HTTP/2), server IP address, and response timing with interactive breakdown tooltip showing DNS lookup, connect, and total time.
+- **Server-Side Language Detection** - Identifies backend languages and frameworks via `X-Powered-By` and `Server` headers. Supports PHP, ASP.NET, Node.js (Express/Next.js), Python (Django/Flask/Gunicorn/Uvicorn), Ruby (Rails/Puma/Passenger), Java (Servlet/JSP), Go, and Rust.
+- **HTML Report Export** - Export any scan as a self-contained HTML report with embedded styles. Available via the Export button in the UI or `?action=export_report&domain=X&timestamp=Y` API endpoint.
+- **Indexability Filter** - Filter the scan log by search engine visibility (Indexable / Hidden from Search).
+- **Domain Autocomplete** - Type-ahead suggestions from scan history when entering domains.
+- **CLI Bulk Upgrade** - New command `php ~/.periscope/engine.php action=bulk_upgrade` to batch upgrade all historical scans to the latest cache format.
+- **Database Filters Column** - Structured JSON filters column for faster history queries. Stores indexed fields: existence, platform, host, CDN, SSL issuer, HTTP status, IPv6 support, and more.
+- **Debug Mode** - New `--debug` flag for `boot.sh` enables verbose PHP error output. Use `./boot.sh --local --debug` to diagnose 500 errors.
+- **HTML Redirect Detection** - Detects and follows meta refresh and JavaScript redirects (`window.location`, `location.replace`) that occur after HTTP 200 responses. The scanner now fetches content from the final destination, analyzing the actual target site. Displayed in redirect chain with purple "META" or yellow "JS" badges.
+
+### Fixed
+
+- **Database Locking** - Enabled SQLite WAL (Write-Ahead Logging) mode and busy timeout to prevent "database is locked" errors when running CLI bulk operations and UI scans simultaneously.
+- **Image Download Memory Safety** - Rewrote `downloadImage` to use cURL with a progress callback that aborts transfers exceeding the size limit mid-stream, preventing potential OOM crashes from malicious oversized responses.
+
+### Changed
+
+- **Engine Extraction** - Separated `engine.php` from `boot.sh` for easier development and debugging. The boot script now downloads the engine separately.
+- **Connection Info Persistence** - HTTP timing, protocol version, and remote address are now saved to `redirects.json` raw files, preserving this data across cache regenerations.
+- **Smart Cache Migration** - When upgrading old scans, timing/protocol/remote_address data is automatically backfilled from existing `response.json` to `redirects.json` before regeneration, preventing data loss.
+- **Filters Backfill** - Opening legacy v1.3 scans automatically populates the filters column for improved search performance.
+
 ## [1.3.0] - 2026-01-24
 
 ### Added
