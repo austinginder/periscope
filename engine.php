@@ -1,7 +1,13 @@
 <?php
-// SILENCE DEPRECATIONS
-error_reporting(E_ERROR | E_PARSE);
-ini_set('display_errors', '0');
+// ERROR REPORTING - Enable verbose errors when PERISCOPE_DEBUG is set
+if (getenv('PERISCOPE_DEBUG')) {
+    error_reporting(E_ALL);
+    ini_set('display_errors', '1');
+} else {
+    // SILENCE DEPRECATIONS
+    error_reporting(E_ERROR | E_PARSE);
+    ini_set('display_errors', '0');
+}
 
 // --- CLI ARGUMENT PARSING ---
 if (php_sapi_name() === 'cli' && isset($argv[1])) {
@@ -158,6 +164,10 @@ $pdo = null;
 try {
     $pdo = new PDO('sqlite:' . $db_path);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    // Enable WAL mode for better concurrency (allows reads during writes)
+    $pdo->exec("PRAGMA journal_mode=WAL");
+    // Wait up to 5 seconds for locks to clear instead of failing immediately
+    $pdo->exec("PRAGMA busy_timeout=5000");
     $pdo->exec("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL, timestamp INTEGER NOT NULL, data TEXT NOT NULL, filters TEXT DEFAULT '')");
     // Migration: add filters column if it doesn't exist (for existing databases)
     $cols = $pdo->query("PRAGMA table_info(history)")->fetchAll(PDO::FETCH_COLUMN, 1);
