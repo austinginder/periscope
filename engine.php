@@ -375,20 +375,30 @@ function getFileByHash($domain, $hash, $extension) {
     return file_exists($filepath) ? file_get_contents($filepath) : null;
 }
 
-function downloadImage($url, $maxSize = 2000000) {
-    $ctx = stream_context_create([
-        'http' => [
-            'timeout' => 5,
-            'ignore_errors' => true,
-            'follow_location' => true,
-            'user_agent' => 'Periscope/' . PERISCOPE_VERSION . ' (Image Fetcher)',
-            'header' => "Accept: image/webp,image/png,image/jpeg,image/gif,image/*\r\n"
-        ],
-        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
+function downloadImage($url, $maxSize = 10000000) {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS => 5,
+        CURLOPT_TIMEOUT => 5,
+        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_USERAGENT => 'Periscope/' . PERISCOPE_VERSION . ' (Image Fetcher)',
+        CURLOPT_HTTPHEADER => ['Accept: image/webp,image/png,image/jpeg,image/gif,image/*'],
+        // Abort download if size exceeds limit (prevents OOM on malicious large files)
+        CURLOPT_NOPROGRESS => false,
+        CURLOPT_PROGRESSFUNCTION => function($ch, $dlTotal, $dlNow, $ulTotal, $ulNow) use ($maxSize) {
+            return ($dlTotal > $maxSize || $dlNow > $maxSize) ? 1 : 0;
+        },
     ]);
 
-    $content = @file_get_contents($url, false, $ctx);
-    if (!$content || strlen($content) > $maxSize) return null;
+    $content = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if (!$content || $httpCode !== 200 || strlen($content) > $maxSize) return null;
 
     // Detect extension from content type or URL
     $extension = 'jpg'; // default
@@ -748,6 +758,48 @@ function getRedirectChain($url, $maxRedirects = 10) {
     }
 
     return ['chain' => $chain, 'connection' => $connectionInfo];
+}
+
+function detectHtmlRedirect($html) {
+    if (!$html || strlen($html) < 10) return null;
+
+    // Meta refresh: <meta http-equiv="refresh" content="0;url=https://example.com">
+    if (preg_match('/<meta[^>]+http-equiv=["\']?refresh["\']?[^>]+content=["\']?\d+\s*;\s*url=([^"\'>\s]+)/i', $html, $m)) {
+        return ['type' => 'meta_refresh', 'url' => html_entity_decode(trim($m[1]))];
+    }
+    // Also check reversed attribute order
+    if (preg_match('/<meta[^>]+content=["\']?\d+\s*;\s*url=([^"\'>\s]+)["\']?[^>]+http-equiv=["\']?refresh/i', $html, $m)) {
+        return ['type' => 'meta_refresh', 'url' => html_entity_decode(trim($m[1]))];
+    }
+
+    // JavaScript: window.location.replace("...")
+    if (preg_match('/(?:window\.)?location\.replace\s*\(\s*["\']([^"\']+)["\']\s*\)/i', $html, $m)) {
+        return ['type' => 'javascript', 'url' => $m[1]];
+    }
+    // JavaScript: window.location = "..." or location.href = "..."
+    if (preg_match('/(?:window\.)?location(?:\.href)?\s*=\s*["\']([^"\']+)["\']/i', $html, $m)) {
+        return ['type' => 'javascript', 'url' => $m[1]];
+    }
+
+    return null;
+}
+
+function getUrlStatus($url, $timeout = 5) {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_NOBODY => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS => 5,
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_USERAGENT => 'Periscope/' . PERISCOPE_VERSION
+    ]);
+    curl_exec($ch);
+    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $finalUrl = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+    curl_close($ch);
+    return ['status_code' => $status ?: null, 'final_url' => $finalUrl];
 }
 
 function getHttpVersionString($version) {
@@ -1394,7 +1446,9 @@ function detectTechnology($html, $headers = []) {
     return $result;
 }
 
-function detectMetadata($domain, $html = null, &$rawFiles = []) {
+function detectMetadata($domain, $html = null, &$rawFiles = [], $storageDomain = null) {
+    // Use storageDomain for saving files (defaults to $domain if not specified)
+    $storageDomain = $storageDomain ?: $domain;
     $result = [
         'robots_txt' => null,
         'sitemap' => null,
@@ -1762,7 +1816,7 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
             }
             $ogImageData = downloadImage($ogImageUrl);
             if ($ogImageData) {
-                $stored = storeFileByHash($domain, $ogImageData['content'], $ogImageData['extension']);
+                $stored = storeFileByHash($storageDomain, $ogImageData['content'], $ogImageData['extension']);
                 $og['image_hash'] = $stored['hash'];
                 $og['image_extension'] = $stored['extension'];
                 $og['image_size'] = $stored['size'];
@@ -1791,7 +1845,7 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
             }
             $twitterImageData = downloadImage($twitterImageUrl);
             if ($twitterImageData) {
-                $stored = storeFileByHash($domain, $twitterImageData['content'], $twitterImageData['extension']);
+                $stored = storeFileByHash($storageDomain, $twitterImageData['content'], $twitterImageData['extension']);
                 $twitter['image_hash'] = $stored['hash'];
                 $twitter['image_extension'] = $stored['extension'];
                 $twitter['image_size'] = $stored['size'];
@@ -1944,8 +1998,8 @@ function detectMetadata($domain, $html = null, &$rawFiles = []) {
         elseif (substr($favicon, 0, 4) === "GIF8") $extension = 'gif';
         elseif (substr($favicon, 0, 4) === "RIFF" && substr($favicon, 8, 4) === "WEBP") $extension = 'webp';
 
-        // Store in hash-based location
-        $stored = storeFileByHash($domain, $favicon, $extension);
+        // Store in hash-based location (use storageDomain for consistency)
+        $stored = storeFileByHash($storageDomain, $favicon, $extension);
         $result['favicon'] = [
             'present' => true,
             'hash' => $stored['hash'],
@@ -2070,6 +2124,32 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
 
     // Build request info from redirect chain (if available)
     $redirectChain = $raw['redirect_chain'] ?? [];
+
+    // Check for HTML redirects if not already detected (for cache regeneration)
+    $hasHtmlRedirect = false;
+    foreach ($redirectChain as $hop) {
+        if (isset($hop['type']) && in_array($hop['type'], ['meta_refresh', 'javascript'])) {
+            $hasHtmlRedirect = true;
+            break;
+        }
+    }
+    if (!$hasHtmlRedirect && !empty($html)) {
+        $htmlRedirect = detectHtmlRedirect($html);
+        if ($htmlRedirect && !empty($htmlRedirect['url'])) {
+            $targetUrl = $htmlRedirect['url'];
+            if (strpos($targetUrl, 'http') !== 0) {
+                $targetUrl = "https://{$domain}" . (strpos($targetUrl, '/') === 0 ? '' : '/') . $targetUrl;
+            }
+            $targetStatus = getUrlStatus($targetUrl);
+            $redirectChain[] = [
+                'url' => $targetUrl,
+                'status_code' => $targetStatus['status_code'],
+                'status_text' => $targetStatus['status_code'] ? getHttpStatusText($targetStatus['status_code']) : null,
+                'type' => $htmlRedirect['type']
+            ];
+        }
+    }
+
     $finalHop = !empty($redirectChain) ? end($redirectChain) : null;
     $requestInfo = $finalHop ? [
         'url' => $finalHop['url'] ?? "https://$domain",
@@ -2205,6 +2285,9 @@ function performLookup($domain, $options = []) {
     // Progress reporting closures
     $progress = $useSSE
         ? function($msg) use (&$currentStep, $totalSteps) { sendProgress(++$currentStep, $totalSteps, $msg); }
+        : function($msg) { cliProgress($msg); };
+    $progressUpdate = $useSSE
+        ? function($msg) use (&$currentStep, $totalSteps) { sendProgress($currentStep, $totalSteps, $msg); }
         : function($msg) { cliProgress($msg); };
     $progressDone = $useSSE
         ? function($msg) {} // SSE doesn't need "done" messages
@@ -2437,7 +2520,79 @@ function performLookup($domain, $options = []) {
         }
     }
 
-    $rawSsl = getRawSSL($targetHost);
+    // Detect HTML-based redirects (meta refresh, JavaScript)
+    $htmlRedirect = detectHtmlRedirect($html);
+    $htmlRedirectHost = null;
+    if ($htmlRedirect && !empty($htmlRedirect['url'])) {
+        $targetUrl = $htmlRedirect['url'];
+        // Handle relative URLs
+        if (strpos($targetUrl, 'http') !== 0) {
+            $targetUrl = "https://{$targetHost}" . (strpos($targetUrl, '/') === 0 ? '' : '/') . $targetUrl;
+        }
+        // Fetch target URL status
+        $targetStatus = getUrlStatus($targetUrl);
+        // Add HTML redirect to chain
+        $redirectChain[] = [
+            'url' => $targetUrl,
+            'status_code' => $targetStatus['status_code'],
+            'status_text' => $targetStatus['status_code'] ? getHttpStatusText($targetStatus['status_code']) : null,
+            'type' => $htmlRedirect['type']
+        ];
+
+        // Follow the HTML redirect - fetch content from final destination
+        $htmlRedirectHost = parse_url($targetUrl, PHP_URL_HOST);
+        if ($htmlRedirectHost && $targetStatus['status_code'] === 200) {
+            $progressUpdate('Following HTML redirect to ' . $htmlRedirectHost . '...');
+
+            // Re-fetch HTML from the redirect target
+            $redirectHtml = @file_get_contents($targetUrl, false, stream_context_create([
+                'http' => ['timeout' => 5, 'ignore_errors' => true, 'header' => $browserHeaders],
+                'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
+            ]));
+            if ($redirectHtml && strlen($redirectHtml) > 100) {
+                $html = $redirectHtml;
+            }
+
+            // Re-fetch headers from redirect target
+            $h_out = shell_exec("curl -I -s -L --max-time 3 -A " . escapeshellarg($browserUA) . " " . escapeshellarg($targetUrl));
+            if ($h_out) {
+                $headers = [];
+                foreach (explode("\n", $h_out) as $line) {
+                    $line = trim($line);
+                    if (!$line) continue;
+                    if (preg_match('/^HTTP\/[\d.]+ (\d+)/', $line, $m)) {
+                        $httpStatus = (int)$m[1];
+                        continue;
+                    }
+                    if (strpos($line, ':') !== false) {
+                        list($k, $v) = explode(':', $line, 2);
+                        $headers[strtolower(trim($k))] = trim($v);
+                    }
+                }
+            }
+
+            // Update connection info for the redirect target
+            $redirectResult = getRedirectChain($targetUrl);
+            if (!empty($redirectResult['connection'])) {
+                $connectionInfo = $redirectResult['connection'];
+                // Merge connection info into the HTML redirect hop
+                $lastIndex = count($redirectChain) - 1;
+                if (isset($connectionInfo['http_version'])) {
+                    $redirectChain[$lastIndex]['protocol'] = $connectionInfo['http_version'];
+                }
+                if (isset($connectionInfo['timing'])) {
+                    $redirectChain[$lastIndex]['timing'] = $connectionInfo['timing'];
+                }
+                if (isset($connectionInfo['remote_address'])) {
+                    $redirectChain[$lastIndex]['remote_address'] = $connectionInfo['remote_address'];
+                }
+            }
+        }
+    }
+
+    // Use redirect target host for SSL if we followed an HTML redirect
+    $sslHost = $htmlRedirectHost ?: $targetHost;
+    $rawSsl = getRawSSL($sslHost);
     $progressDone('HTTP headers & SSL fetched');
 
     // Phase 6: Domain Registration
@@ -2447,15 +2602,16 @@ function performLookup($domain, $options = []) {
     $timestamp = time();
     $progressDone('Domain registration retrieved');
 
-    // Analysis
+    // Analysis - use redirect target host if we followed an HTML redirect
+    $analysisHost = $htmlRedirectHost ?: $targetHost;
     $progress('Analyzing results...');
-    $ssl = getSSLInfo($targetHost, $rawSsl);
-    $cms = detectCMS($targetHost, $html, $headers);
+    $ssl = getSSLInfo($sslHost, $rawSsl);
+    $cms = detectCMS($analysisHost, $html, $headers);
     $infra = detectInfrastructure($headers);
     $security = detectSecurityHeaders($headers);
     $technology = detectTechnology($html, $headers);
     $metadataRawFiles = [];
-    $metadata = detectMetadata($targetHost, $html, $metadataRawFiles);
+    $metadata = detectMetadata($analysisHost, $html, $metadataRawFiles, $targetHost);
     $indexability = detectSearchEngineBlocking($html, $headers, $metadataRawFiles['robots_txt'] ?? null);
 
     $scanPath = getScanPath($targetHost, $timestamp);

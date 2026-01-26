@@ -336,7 +336,11 @@
                             <span class="inline-flex items-center gap-1.5">
                                 <span class="font-mono font-medium"
                                     :class="isCrossDomainRedirect ? 'text-amber-700 dark:text-amber-300' : 'text-slate-700 dark:text-slate-300'">{{ getHostFromUrl(hop.url) }}</span>
-                                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                                <!-- HTML redirect badges (META/JS) -->
+                                <span v-if="hop.type === 'meta_refresh'" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">META</span>
+                                <span v-else-if="hop.type === 'javascript'" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400">JS</span>
+                                <!-- HTTP status code badges -->
+                                <span v-else class="px-1.5 py-0.5 rounded text-[10px] font-bold"
                                     :class="{
                                         'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400': hop.status_code === 200,
                                         'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-400': hop.status_code === 301 || hop.status_code === 308,
