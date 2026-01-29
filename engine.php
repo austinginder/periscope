@@ -155,7 +155,8 @@ const DNS_CHECKS_EMAIL = [
     ['type' => 'CNAME', 'name' => '_acme-challenge'], ['type' => 'TXT', 'name' => '_acme-challenge'],
     // Domain verification records
     ['type' => 'TXT', 'name' => '_google'], ['type' => 'TXT', 'name' => '_github-challenge'],
-    ['type' => 'TXT', 'name' => '_facebook'], ['type' => 'TXT', 'name' => '_dnslink']
+    ['type' => 'TXT', 'name' => '_facebook'], ['type' => 'TXT', 'name' => '_dnslink'],
+    ['type' => 'TXT', 'name' => '_cf-custom-hostname']
 ];
 
 // --- DATABASE SETUP ---
@@ -432,7 +433,13 @@ function loadResponseCache($path) {
 }
 
 function isCacheValid($cache) {
-    return $cache && isset($cache['plugin_version']) && $cache['plugin_version'] === PERISCOPE_VERSION;
+    if (!$cache || !isset($cache['plugin_version'])) return false;
+    // Compare only major.minor version (ignore patch for minor updates)
+    $currentParts = explode('.', PERISCOPE_VERSION);
+    $cachedParts = explode('.', $cache['plugin_version']);
+    $currentMinor = $currentParts[0] . '.' . ($currentParts[1] ?? '0');
+    $cachedMinor = $cachedParts[0] . '.' . ($cachedParts[1] ?? '0');
+    return $currentMinor === $cachedMinor;
 }
 
 function loadRawFiles($path) {
@@ -776,8 +783,12 @@ function detectHtmlRedirect($html) {
     if (preg_match('/(?:window\.)?location\.replace\s*\(\s*["\']([^"\']+)["\']\s*\)/i', $html, $m)) {
         return ['type' => 'javascript', 'url' => $m[1]];
     }
-    // JavaScript: window.location = "..." or location.href = "..."
-    if (preg_match('/(?:window\.)?location(?:\.href)?\s*=\s*["\']([^"\']+)["\']/i', $html, $m)) {
+    // JavaScript: window.location = "..." or window.location.href = "..." or location.href = "..."
+    // Must have "window." prefix OR ".href" suffix to avoid matching HTML attributes like data-location="..."
+    if (preg_match('/window\.location(?:\.href)?\s*=\s*["\']([^"\']+)["\']/i', $html, $m)) {
+        return ['type' => 'javascript', 'url' => $m[1]];
+    }
+    if (preg_match('/[^-\w]location\.href\s*=\s*["\']([^"\']+)["\']/i', $html, $m)) {
         return ['type' => 'javascript', 'url' => $m[1]];
     }
 
@@ -1560,7 +1571,8 @@ function detectMetadata($domain, $html = null, &$rawFiles = [], $storageDomain =
     // Check ads.txt (IAB Authorized Digital Sellers)
     $adsTxt = @file_get_contents("https://" . $domain . "/ads.txt", false, $ctx);
     if (!$adsTxt) $adsTxt = @file_get_contents("http://" . $domain . "/ads.txt", false, $ctx);
-    if ($adsTxt && preg_match('/^[a-z0-9.-]+,\s*[a-z0-9]+,/im', $adsTxt)) {
+    // Validate: must match ads.txt format AND not be HTML (404 pages often return HTML)
+    if ($adsTxt && preg_match('/^[a-z0-9.-]+,\s*[a-z0-9]+,/im', $adsTxt) && stripos($adsTxt, '<!DOCTYPE') === false && stripos($adsTxt, '<html') === false) {
         $rawFiles['ads_txt'] = $adsTxt;
         $sellers = [];
         $directCount = 0;
@@ -1589,7 +1601,8 @@ function detectMetadata($domain, $html = null, &$rawFiles = [], $storageDomain =
     // Check app-ads.txt (IAB Authorized Digital Sellers for Apps)
     $appAdsTxt = @file_get_contents("https://" . $domain . "/app-ads.txt", false, $ctx);
     if (!$appAdsTxt) $appAdsTxt = @file_get_contents("http://" . $domain . "/app-ads.txt", false, $ctx);
-    if ($appAdsTxt && preg_match('/^[a-z0-9.-]+,\s*[a-z0-9]+,/im', $appAdsTxt)) {
+    // Validate: must match app-ads.txt format AND not be HTML (404 pages often return HTML)
+    if ($appAdsTxt && preg_match('/^[a-z0-9.-]+,\s*[a-z0-9]+,/im', $appAdsTxt) && stripos($appAdsTxt, '<!DOCTYPE') === false && stripos($appAdsTxt, '<html') === false) {
         $rawFiles['app_ads_txt'] = $appAdsTxt;
         $sellers = [];
         $directCount = 0;
@@ -2793,7 +2806,7 @@ if ($action === 'check_status') {
 
 if ($pdo) {
     if ($action === 'get_history') {
-        $limit = 50;
+        $limit = isset($_GET['limit']) ? max(1, (int)$_GET['limit']) : 50;
         $offset = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
         $search = isset($_GET['search']) ? trim($_GET['search']) : '';
         $existence = isset($_GET['existence']) ? $_GET['existence'] : 'all';
@@ -3999,20 +4012,50 @@ function render() {
         </div>`;
     }
     
-    // Redirect chain
-    if (data.redirect_chain && data.redirect_chain.length > 1) {
+    // Redirect chain - filter out simple http->https upgrades
+    let displayChain = data.redirect_chain || [];
+    if (displayChain.length >= 2) {
+        try {
+            const first = new URL(displayChain[0].url);
+            const second = new URL(displayChain[1].url);
+            if (first.protocol === "http:" && second.protocol === "https:" &&
+                first.hostname.replace(/^www\\./, "") === second.hostname.replace(/^www\\./, "")) {
+                displayChain = displayChain.slice(1);
+            }
+        } catch {}
+    }
+    if (displayChain && displayChain.length > 1) {
         html += `<div class="mb-6 flex justify-center">
             <div class="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm bg-amber-900/20 border border-amber-800/50">
                 <span class="text-amber-400 font-medium"><span class="mdi mdi-redirect mr-1"></span> Redirects</span>`;
-        data.redirect_chain.forEach((hop, i) => {
+        displayChain.forEach((hop, i) => {
             const statusClass = hop.status_code === 200 ? "bg-emerald-900/40 text-emerald-400" : 
                                hop.status_code === 301 || hop.status_code === 308 ? "bg-cyan-900/40 text-cyan-400" :
                                hop.status_code >= 400 ? "bg-red-900/40 text-red-400" : "bg-amber-900/40 text-amber-400";
-            html += `<span class="flex items-center gap-1">
-                <span class="font-mono text-xs text-amber-300 max-w-[200px] truncate" title="${esc(hop.url)}">${esc(new URL(hop.url).hostname)}</span>
+            // Smart display: show path if same host as previous hop
+            let display;
+            try {
+                const url = new URL(hop.url);
+                // Extract path from raw URL to preserve double slashes etc.
+                const pathMatch = hop.url.match(/^https?:\/\/[^\/]+(\/.*)?$/);
+                const path = pathMatch ? (pathMatch[1] || "/") : "/";
+                if (i > 0) {
+                    const prevUrl = new URL(displayChain[i - 1].url);
+                    display = prevUrl.hostname === url.hostname ? path : url.hostname;
+                } else {
+                    display = url.hostname;
+                }
+            } catch { display = hop.url; }
+            html += `<div class="inline-flex items-center gap-1 relative group cursor-help select-none">
+                <span class="font-mono text-xs text-amber-300">${esc(display)}</span>
                 <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${statusClass}">${hop.status_code}</span>
-            </span>`;
-            if (i < data.redirect_chain.length - 1) html += `<span class="text-amber-600 mdi mdi-arrow-right"></span>`;
+                <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-slate-800 rounded-lg shadow-lg border border-slate-700 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50 whitespace-nowrap">
+                    <div class="text-xs font-mono text-slate-200 max-w-xs truncate">${esc(hop.url)}</div>
+                    ${hop.remote_address ? `<div class="text-[10px] text-slate-400 mt-1"><span class="mdi mdi-server-network mr-1"></span>${esc(hop.remote_address)}</div>` : ""}
+                    <div class="absolute left-1/2 -translate-x-1/2 -bottom-1.5 w-3 h-3 bg-slate-800 border-r border-b border-slate-700 transform rotate-45"></div>
+                </div>
+            </div>`;
+            if (i < displayChain.length - 1) html += `<span class="text-amber-600 mdi mdi-arrow-right"></span>`;
         });
         html += `</div></div>`;
     }

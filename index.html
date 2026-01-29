@@ -88,7 +88,7 @@
                             <span class="mdi mdi-github text-xl"></span>
                         </a>
                     
-                        <button @click="openHistory()"
+                        <button v-if="!localMode || bridgeConnected === true" @click="openHistory()"
                             class="h-10 w-10 flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors">
                             <span class="mdi mdi-history text-xl"></span>
                         </button>
@@ -111,7 +111,7 @@
 
         <main class="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-            <div class="max-w-3xl mx-auto mb-10 transition-all duration-500 relative z-30"
+            <div v-if="!localMode || bridgeConnected === true" class="max-w-3xl mx-auto mb-10 transition-all duration-500 relative z-30"
                 :class="{'mt-10 md:mt-20 scale-110': !response.domain, 'mt-0': response.domain}">
                 <div class="relative group">
                     <div
@@ -323,7 +323,7 @@
                 </div>
 
                 <!-- Redirect chain indicator -->
-                <div v-if="response.redirect_chain && response.redirect_chain.length > 1" class="mb-6 flex justify-center">
+                <div v-if="displayRedirectChain && displayRedirectChain.length > 1" class="mb-6 flex justify-center">
                     <div class="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm"
                         :class="isCrossDomainRedirect
                             ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50'
@@ -332,10 +332,10 @@
                             <span class="mdi mdi-redirect mr-1"></span>
                             Redirects
                         </span>
-                        <template v-for="(hop, index) in response.redirect_chain" :key="index">
-                            <span class="inline-flex items-center gap-1.5">
+                        <template v-for="(hop, index) in displayRedirectChain" :key="index">
+                            <div class="inline-flex items-center gap-1.5 relative group/hop cursor-help select-none">
                                 <span class="font-mono font-medium"
-                                    :class="isCrossDomainRedirect ? 'text-amber-700 dark:text-amber-300' : 'text-slate-700 dark:text-slate-300'">{{ getHostFromUrl(hop.url) }}</span>
+                                    :class="isCrossDomainRedirect ? 'text-amber-700 dark:text-amber-300' : 'text-slate-700 dark:text-slate-300'">{{ getRedirectDisplay(hop, index) }}</span>
                                 <!-- HTML redirect badges (META/JS) -->
                                 <span v-if="hop.type === 'meta_refresh'" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">META</span>
                                 <span v-else-if="hop.type === 'javascript'" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400">JS</span>
@@ -347,7 +347,16 @@
                                         'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400': hop.status_code === 302 || hop.status_code === 303 || hop.status_code === 307,
                                         'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400': hop.status_code >= 400
                                     }">{{ hop.status_code }}</span>
-                            </span>
+                                <!-- HTML Tooltip -->
+                                <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 opacity-0 invisible group-hover/hop:opacity-100 group-hover/hop:visible transition-all duration-150 z-50 whitespace-nowrap">
+                                    <div class="text-xs font-mono text-slate-700 dark:text-slate-200 max-w-xs truncate">{{ hop.url }}</div>
+                                    <div v-if="hop.remote_address" class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                                        <span class="mdi mdi-server-network mr-1"></span>{{ hop.remote_address }}
+                                    </div>
+                                    <!-- Arrow pointing down -->
+                                    <div class="absolute left-1/2 -translate-x-1/2 -bottom-1.5 w-3 h-3 bg-white dark:bg-slate-800 border-r border-b border-slate-200 dark:border-slate-700 transform rotate-45"></div>
+                                </div>
+                            </div>
                             <span v-if="index < response.redirect_chain.length - 1"
                                 :class="isCrossDomainRedirect ? 'text-amber-400 dark:text-amber-600' : 'text-slate-400 dark:text-slate-600'"
                                 class="mdi mdi-arrow-right"></span>
@@ -1792,7 +1801,7 @@
                     serverVersion: null,
                     response: { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} },
                     currentTheme: localStorage.getItem('theme') || (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
-                    showHistoryModal: false, historyItems: [], historyTotal: 0, historySearch: '', showVersionsModal: false, domainVersions: [], showAutocomplete: false, autocompleteSuggestions: [], autocompleteTimeout: null,
+                    showHistoryModal: false, historyItems: [], historyTotal: 0, historyLimit: 50, historySearch: '', showVersionsModal: false, domainVersions: [], showAutocomplete: false, autocompleteSuggestions: [], autocompleteTimeout: null,
                     historyFilters: { existence: 'all', platform: 'all', scanCount: 'all', indexability: 'all' },
                     availablePlatforms: [],
                     scanCountOptions: [],
@@ -1825,12 +1834,30 @@
                         this.selectedHistoryIndex = -1;
                         this.historySearch = '';
                         this.historyFilters = { existence: 'all', platform: 'all', scanCount: 'all', indexability: 'all' };
-                        this.loadHistory();
+                        this.loadHistory().then(() => {
+                            // Auto-select current scan if viewing one
+                            if (this.domain && this.response.timestamp) {
+                                const currentTimestamp = parseInt(this.response.timestamp);
+                                // First try to find exact match (domain + timestamp)
+                                let idx = this.historyItems.findIndex(item => 
+                                    item.domain === this.domain && parseInt(item.timestamp) === currentTimestamp
+                                );
+                                // If not found, find the most recent scan of this domain
+                                if (idx === -1) {
+                                    idx = this.historyItems.findIndex(item => item.domain === this.domain);
+                                }
+                                if (idx !== -1) {
+                                    this.selectedHistoryIndex = idx;
+                                    this.$nextTick(() => this.scrollToSelectedHistory());
+                                }
+                            }
+                            // Focus search input after selection is set
+                            this.$nextTick(() => {
+                                if (this.$refs.historySearchInput) this.$refs.historySearchInput.focus();
+                            });
+                        });
                         this.loadAvailablePlatforms();
                         this.loadScanCountOptions();
-                        this.$nextTick(() => {
-                            if (this.$refs.historySearchInput) this.$refs.historySearchInput.focus();
-                        });
                     }
                 }
             },
@@ -1895,9 +1922,9 @@
                     return count;
                 },
                 isCrossDomainRedirect() {
-                    if (!this.response.redirect_chain || this.response.redirect_chain.length < 2) return false;
-                    const first = this.response.redirect_chain[0];
-                    const last = this.response.redirect_chain[this.response.redirect_chain.length - 1];
+                    if (!this.displayRedirectChain || this.displayRedirectChain.length < 2) return false;
+                    const first = this.displayRedirectChain[0];
+                    const last = this.displayRedirectChain[this.displayRedirectChain.length - 1];
                     try {
                         const firstHost = new URL(first.url).hostname.replace(/^www\./, '');
                         const lastHost = new URL(last.url).hostname.replace(/^www\./, '');
@@ -1905,6 +1932,23 @@
                         const getRoot = (h) => h.split('.').slice(-2).join('.');
                         return getRoot(firstHost) !== getRoot(lastHost);
                     } catch { return false; }
+                },
+                displayRedirectChain() {
+                    // Filter out simple HTTP→HTTPS upgrades (same host, just protocol change)
+                    const chain = this.response.redirect_chain;
+                    if (!chain || chain.length < 2) return chain;
+                    
+                    // Check if first hop is just http→https of same host
+                    try {
+                        const first = new URL(chain[0].url);
+                        const second = new URL(chain[1].url);
+                        // If first is http, second is https, and hostnames match (ignoring www), skip first hop
+                        if (first.protocol === 'http:' && second.protocol === 'https:' &&
+                            first.hostname.replace(/^www\./, '') === second.hostname.replace(/^www\./, '')) {
+                            return chain.slice(1);
+                        }
+                    } catch {}
+                    return chain;
                 },
                 spfAnalysis() {
                     if (!this.response.dns_records) return null;
@@ -2265,6 +2309,9 @@
                 if (urlParams.has('local')) {
                     this.localMode = true;
                     this.checkBridgeCapabilities();
+                } else {
+                    // Auto-detect local bridge and switch to local mode seamlessly
+                    this.detectLocalBridge();
                 }
                 document.addEventListener('keydown', (e) => {
                     // 1. Existing shortcuts
@@ -2343,7 +2390,34 @@
                 getHostFromUrl(url) {
                     try { return new URL(url).hostname; } catch { return url; }
                 },
-                resetView() { this.response = { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} }; this.domain = ""; this.domainVersions = []; },
+                getRedirectDisplay(hop, index) {
+                    try {
+                        const url = new URL(hop.url);
+                        const hostname = url.hostname;
+                        // Extract path from raw URL to preserve double slashes etc.
+                        const pathMatch = hop.url.match(/^https?:\/\/[^\/]+(\/.*)?$/);
+                        const path = pathMatch ? (pathMatch[1] || '/') : '/';
+                        
+                        // Check if previous hop has the same hostname
+                        if (index > 0 && this.displayRedirectChain) {
+                            const prevUrl = new URL(this.displayRedirectChain[index - 1].url);
+                            if (prevUrl.hostname === hostname) {
+                                // Same host, show path instead to differentiate
+                                return path;
+                            }
+                        }
+                        return hostname;
+                    } catch { return hop.url; }
+                },
+                resetView() {
+                    this.response = { domain: "", errors: [], zone: "", timestamp: null, ip_lookup: {} };
+                    this.domain = "";
+                    this.domainVersions = [];
+                    // Update URL to remove domain parameter
+                    const newUrl = new URL(window.location);
+                    newUrl.searchParams.delete('domain');
+                    history.pushState({}, '', newUrl);
+                },
                 toggleTheme() {
                     this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
                     localStorage.setItem('theme', this.currentTheme);
@@ -2683,7 +2757,6 @@
 
                 // History
                 openHistory() {
-                    this.loadHistory();
                     this.showHistoryModal = true;
                 },
                 checkBridgeCapabilities() {
@@ -2719,6 +2792,48 @@
                             this.pendingDeepLink = null;
                         });
                 },
+                detectLocalBridge() {
+                    // Silently check if local bridge is available and switch to local mode
+                    fetch('http://127.0.0.1:8989/engine.php?action=check_status', { 
+                        method: 'GET',
+                        mode: 'cors'
+                    })
+                        .then(r => r.json())
+                        .then(data => {
+                            // Bridge is available, switch to local mode seamlessly
+                            this.localMode = true;
+                            this.bridgeConnected = true;
+                            this.bridgeHasDb = data.has_db;
+                            this.serverVersion = data.plugin_version || null;
+                            if (data.has_db) {
+                                this.dbInfo = {
+                                    path: data.db_path || '',
+                                    size: data.db_size || 0,
+                                    scanCount: data.scan_count || 0
+                                };
+                            }
+                            this.scansInfo = {
+                                path: data.scans_path || '',
+                                size: data.scans_size || 0
+                            };
+                            
+                            // Update URL without reload
+                            const newUrl = new URL(window.location);
+                            newUrl.searchParams.set('local', 'true');
+                            history.replaceState({}, '', newUrl);
+                            
+                            // Load history from bridge database
+                            this.loadHistory().then(() => {
+                                if (this.pendingDeepLink) {
+                                    this.handleDeepLink(this.pendingDeepLink);
+                                    this.pendingDeepLink = null;
+                                }
+                            });
+                        })
+                        .catch(() => {
+                            // Bridge not available, stay in non-local mode (no action needed)
+                        });
+                },
                 handleDeepLink(domain) {
                     const cached = this.historyItems.find(item =>
                         item.domain.toLowerCase() === domain.toLowerCase()
@@ -2734,7 +2849,8 @@
                 loadHistory(append = false) {
                     if (this.bridgeHasDb) {
                         const offset = append ? this.historyItems.length : 0;
-                        let params = `action=get_history&offset=${offset}`;
+                        const limit = append ? 50 : this.historyLimit;
+                        let params = `action=get_history&offset=${offset}&limit=${limit}`;
                         if (this.historySearch) params += `&search=${encodeURIComponent(this.historySearch)}`;
                         if (this.historyFilters.existence !== 'all') params += `&existence=${this.historyFilters.existence}`;
                         if (this.historyFilters.platform !== 'all') params += `&platform=${encodeURIComponent(this.historyFilters.platform)}`;
@@ -2745,6 +2861,7 @@
                             .then(data => {
                                 if (append) {
                                     this.historyItems = [...this.historyItems, ...data.items];
+                                    this.historyLimit = this.historyItems.length;
                                 } else {
                                     this.historyItems = data.items;
                                 }
