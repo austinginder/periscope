@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.4.1] - 2026-01-28
+
+### Added
+
+- **Auto-Detect Local Bridge** - When visiting `periscope.run` (without `?local=true`), the app now automatically detects if the Local Bridge is running and seamlessly switches to local mode using `pushState` for a smooth transition.
+- **Redirect Chain Tooltips** - Hovering over any hop in the redirect chain now shows a detailed tooltip with the full URL and server IP address.
+- **Smart Redirect Display** - When consecutive redirect hops share the same hostname, the path is shown instead (e.g., `//` → `/`) to clarify what changed. Useful for identifying path normalization redirects.
+- **Scan Log Auto-Select** - Opening the Scan Log (`Cmd+K`) while viewing a scan now auto-selects and scrolls to that scan, enabling quick navigation with arrow keys.
+- **Scan Log Pagination Persistence** - The number of items loaded via "Load more" is now preserved when reopening the Scan Log.
+- **Cloudflare Custom Hostname Detection** - Added `_cf-custom-hostname` TXT record to DNS checks.
+
+### Fixed
+
+- **JavaScript Redirect False Positives** - Fixed detection matching HTML attributes like `data-accordion-location="10"` as JavaScript redirects. Now requires `window.location` or `location.href` patterns specifically.
+- **ads.txt/app-ads.txt False Positives** - Fixed detection accepting HTML 404 error pages as valid ads.txt files. Now validates that the response is not HTML.
+- **HTTP→HTTPS Redirect Noise** - Simple protocol upgrades (http→https of the same host) are now filtered from the redirect chain display to reduce noise.
+
+### Changed
+
+- **Logo Click Behavior** - Clicking the Periscope logo now uses `pushState` to smoothly reset the view and update the URL (removing the `domain` parameter) without a page reload.
+- **Cache Version Matching** - Patch versions are now ignored when validating cached scans. A v1.4 cache is considered valid for v1.4.1, preventing unnecessary reprocessing on patch releases. Only minor version changes (e.g., 1.4 → 1.5) trigger cache regeneration.
+- **Pre-Connection UI** - The domain input, scan button, and scan log icon are now hidden until the Local Bridge connection is established, providing a cleaner loading state.
+
+### Documentation
+
+- **Versioning & Cache Upgrades** - Added new section to README explaining semantic versioning policy and cache validity rules.
+
 ## [1.4.0] - 2026-01-26
 
 ### Added

@@ -16,7 +16,7 @@ if (php_sapi_name() === 'cli' && isset($argv[1])) {
 }
 
 // --- PLUGIN VERSION ---
-define('PERISCOPE_VERSION', '1.4');
+define('PERISCOPE_VERSION', '1.4.1');
 
 // --- AUTOLOADER ---
 spl_autoload_register(function ($class) {

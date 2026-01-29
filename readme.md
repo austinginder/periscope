@@ -433,6 +433,37 @@ php ~/.periscope/engine.php google.com
 php ~/.periscope/engine.php action=bulk_upgrade
 ```
 
+## 🔄 Versioning & Cache Upgrades
+
+Periscope uses [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`):
+
+- **MAJOR:** Breaking changes
+- **MINOR:** New features, scan format changes
+- **PATCH:** Bug fixes, minor improvements
+
+### Cache Validity
+
+Cached scan data is considered valid if the **major.minor** version matches. This means:
+
+| Cached Version | Current Version | Cache Valid? | Reason |
+| --- | --- | --- | --- |
+| 1.4 | 1.4.1 | Yes | Same minor version (1.4) |
+| 1.4.1 | 1.4.2 | Yes | Same minor version (1.4) |
+| 1.4 | 1.5 | No | Different minor version |
+| 1.3 | 1.4 | No | Different minor version |
+
+When loading a cached scan with an outdated version, Periscope automatically regenerates the response data from the stored raw files (HTML, headers, DNS records, etc.) using the current engine logic.
+
+### Bulk Upgrade
+
+To upgrade all historical scans to the current version:
+
+```bash
+php ~/.periscope/engine.php action=bulk_upgrade
+```
+
+This reprocesses scans that have raw files available, applying any new detection logic or data transformations from newer versions.
+
 ## 📸 Screenshots
 
 Website Overview
