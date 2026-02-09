@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.2] - 2026-02-08
+
+### Added
+
+- **Custom DNS Server** - New "Advanced Options" panel below the scan input lets you specify a custom DNS server (e.g. `8.8.8.8` or `ns1.oldprovider.com`) for all DNS queries during a scan. Useful for checking records against a specific nameserver during migrations.
+- **DNS Server URL Parameter** - Custom DNS server can be set via `?dns_server=` URL parameter, and is persisted in the URL when set.
+- **DNS Server Indicator** - When a scan uses a custom DNS server, a banner is displayed in the results showing which server was used.
+- **Minnow CMS Detection** - Added detection for the Minnow CMS via the `X-Generator` response header, including version extraction.
+
+### Fixed
+
+- **Missing Response Headers** - Switched HTTP header fetching from `curl -I` (HEAD request) to `curl -D - -o /dev/null` (GET request with discarded body). Many servers return fewer headers for HEAD requests, causing headers like `set-cookie`, `report-to`, `nel`, and `alt-svc` to be missed.
+
 ## [1.4.1] - 2026-01-28
 
 ### Added
