@@ -160,6 +160,25 @@
                         </ul>
                     </div>
                 </div>
+                <!-- Advanced Options -->
+                <div class="mt-2">
+                    <button @click="showAdvanced = !showAdvanced" type="button"
+                        class="text-xs text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors flex items-center gap-1">
+                        <span class="mdi" :class="showAdvanced ? 'mdi-chevron-down' : 'mdi-chevron-right'"></span>
+                        Advanced Options
+                    </button>
+                    <div v-if="showAdvanced" class="mt-2 flex items-center gap-3 animate-scale-in">
+                        <label class="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                            <span class="mdi mdi-dns-outline mr-1"></span>DNS Server
+                        </label>
+                        <input v-model="dnsServer" type="text"
+                            class="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md px-3 py-1.5 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500 focus:outline-none"
+                            placeholder="e.g. 8.8.8.8 or ns1.oldprovider.com" spellcheck="false">
+                        <button v-if="dnsServer" @click="dnsServer = ''" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                            <span class="mdi mdi-close-circle text-sm"></span>
+                        </button>
+                    </div>
+                </div>
                 <!-- Progress Bar -->
                 <div v-if="loading && !loadingFromHistory" class="mt-4 animate-fade-in-up">
                     <div class="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
@@ -307,6 +326,12 @@
                         title="Export as HTML report">
                         <span class="mdi mdi-file-export-outline mr-1"></span> Export
                     </button>
+                </div>
+
+                <!-- Custom DNS Server indicator -->
+                <div v-if="response.dns_server" class="mb-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg px-4 py-2.5 flex items-center gap-2 text-sm">
+                    <span class="mdi mdi-dns-outline text-amber-600 dark:text-amber-400"></span>
+                    <span class="text-amber-700 dark:text-amber-300">DNS records queried via <strong class="font-mono">{{ response.dns_server }}</strong></span>
                 </div>
 
                 <!-- Subdomain indicator -->
@@ -1789,6 +1814,8 @@
             data() {
                 return {
                     domain: "",
+                    dnsServer: "",
+                    showAdvanced: false,
                     loading: false,
                     loadingText: "Scanning...",
                     loadingFromHistory: false,
@@ -2306,6 +2333,12 @@
                     this.pendingDeepLink = this.domain;
                 }
 
+                const dnsServerParam = urlParams.get('dns_server');
+                if (dnsServerParam) {
+                    this.dnsServer = dnsServerParam;
+                    this.showAdvanced = true;
+                }
+
                 if (urlParams.has('local')) {
                     this.localMode = true;
                     this.checkBridgeCapabilities();
@@ -2596,10 +2629,17 @@
                     // 1. Update URL
                     const newUrl = new URL(window.location);
                     newUrl.searchParams.set('domain', this.domain);
+                    if (this.dnsServer) {
+                        newUrl.searchParams.set('dns_server', this.dnsServer);
+                    } else {
+                        newUrl.searchParams.delete('dns_server');
+                    }
                     window.history.pushState({}, '', newUrl);
 
                     // Use EventSource for SSE progress updates
-                    const sseUrl = this.getUrl(`scan=${encodeURIComponent(this.domain)}`);
+                    let scanParams = `scan=${encodeURIComponent(this.domain)}`;
+                    if (this.dnsServer) scanParams += `&dns_server=${encodeURIComponent(this.dnsServer)}`;
+                    const sseUrl = this.getUrl(scanParams);
 
                     // Check if EventSource is supported
                     if (typeof EventSource !== 'undefined') {
@@ -2654,7 +2694,9 @@
                         };
                     } else {
                         // Fallback to regular fetch for older browsers
-                        fetch(this.getUrl(`domain=${encodeURIComponent(this.domain)}`))
+                        let fallbackParams = `domain=${encodeURIComponent(this.domain)}`;
+                        if (this.dnsServer) fallbackParams += `&dns_server=${encodeURIComponent(this.dnsServer)}`;
+                        fetch(this.getUrl(fallbackParams))
                             .then(async response => {
                                 const text = await response.text();
                                 try {

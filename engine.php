@@ -661,9 +661,14 @@ function getWhois($domain, $rdapJson = null) {
 /**
  * Run a dig query with retry on timeout and filter out error messages
  */
-function digQuery($type, $host, $retries = 2) {
+function digQuery($type, $host, $retries = 2, $dnsServer = null) {
     for ($i = 0; $i < $retries; $i++) {
-        $output = shell_exec("dig +short +time=3 +tries=1 -t " . escapeshellarg($type) . " " . escapeshellarg($host) . " 2>/dev/null");
+        $cmd = "dig +short +time=3 +tries=1 -t " . escapeshellarg($type) . " " . escapeshellarg($host);
+        if ($dnsServer) {
+            $cmd .= " @" . escapeshellarg($dnsServer);
+        }
+        $cmd .= " 2>/dev/null";
+        $output = shell_exec($cmd);
         if ($output === null) continue;
 
         // Filter out dig error/warning messages (lines starting with ;;)
@@ -979,6 +984,16 @@ function detectCMS($domain, $html = null, $headers = []) {
     // Ghost
     if (preg_match('/ghost\.io|Ghost\s[\d.]+/i', $html)) {
         return ['name' => 'Ghost', 'version' => null];
+    }
+
+    // Minnow (X-Generator header)
+    if (!empty($headers)) {
+        $h = array_change_key_case($headers, CASE_LOWER);
+        if (isset($h['x-generator']) && stripos($h['x-generator'], 'Minnow') !== false) {
+            $version = null;
+            if (preg_match('/Minnow\s+([\d.]+)/i', $h['x-generator'], $m)) $version = $m[1];
+            return ['name' => 'Minnow', 'version' => $version];
+        }
     }
 
     return null;
@@ -2195,7 +2210,8 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
         'indexability' => detectSearchEngineBlocking($html, $headers, $robotsTxtContent),
         'errors' => [],
         'raw_available' => true,
-        'plugin_version' => PERISCOPE_VERSION
+        'plugin_version' => PERISCOPE_VERSION,
+        'dns_server' => $dnsServer
     ];
 
     // Save cache if we have timestamp info
@@ -2216,7 +2232,7 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
 }
 
 // Helper function to process DNS checks with deduplication
-function processDnsChecks($checks, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, &$check_map, &$raw_records) {
+function processDnsChecks($checks, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, &$check_map, &$raw_records, $dnsServer = null) {
     foreach ($checks as $check) {
         $type = $check['type']; $name = $check['name'];
 
@@ -2229,7 +2245,7 @@ function processDnsChecks($checks, $rootDomain, $hasWildcardA, $wildcardTXTValue
 
         // Check for CNAME before A/AAAA/TXT queries
         if (($type === 'A' || $type === 'AAAA' || $type === 'TXT') && !empty($name) && $type !== 'CNAME') {
-            $cnameOutput = digQuery('CNAME', $host);
+            $cnameOutput = digQuery('CNAME', $host, 2, $dnsServer);
             if ($cnameOutput && !empty(trim($cnameOutput))) {
                 $cnameVal = trim(explode("\n", trim($cnameOutput))[0]);
                 if ($wildcardCNAMEValue !== null && $cnameVal === $wildcardCNAMEValue) continue;
@@ -2242,7 +2258,7 @@ function processDnsChecks($checks, $rootDomain, $hasWildcardA, $wildcardTXTValue
             }
         }
 
-        $output = digQuery($type, $host);
+        $output = digQuery($type, $host, 2, $dnsServer);
         if (!$output) continue;
         foreach (explode("\n", trim($output)) as $val) {
             $val = trim($val); if (empty($val)) continue;
@@ -2292,6 +2308,7 @@ function performLookup($domain, $options = []) {
     global $pdo;
     $useSSE = $options['sse'] ?? false;
     $saveDB = $options['save_db'] ?? false;
+    $dnsServer = $options['dns_server'] ?? null;
     $totalSteps = 7;
     $currentStep = 0;
 
@@ -2354,7 +2371,7 @@ function performLookup($domain, $options = []) {
     $progress('Scanning core DNS records...');
 
     // Check wildcards
-    $wildcardA = digQuery('A', "*.$rootDomain");
+    $wildcardA = digQuery('A', "*.$rootDomain", 2, $dnsServer);
     $hasWildcardA = !empty(trim($wildcardA));
     if ($hasWildcardA) {
         foreach (explode("\n", trim($wildcardA)) as $val) {
@@ -2366,7 +2383,7 @@ function performLookup($domain, $options = []) {
         }
     }
 
-    $wildcardTXT = digQuery('TXT', "*.$rootDomain");
+    $wildcardTXT = digQuery('TXT', "*.$rootDomain", 2, $dnsServer);
     $wildcardTXTValue = null;
     if (!empty(trim($wildcardTXT))) {
         $wildcardTXTValue = trim($wildcardTXT);
@@ -2377,7 +2394,7 @@ function performLookup($domain, $options = []) {
         }
     }
 
-    $wildcardCNAME = digQuery('CNAME', "*.$rootDomain");
+    $wildcardCNAME = digQuery('CNAME', "*.$rootDomain", 2, $dnsServer);
     $wildcardCNAMEValue = null;
     if (!empty(trim($wildcardCNAME))) {
         $wildcardCNAMEValue = trim(explode("\n", trim($wildcardCNAME))[0]);
@@ -2392,7 +2409,7 @@ function performLookup($domain, $options = []) {
     if ($isSubdomain) {
         $subdomainPart = str_replace('.' . $rootDomain, '', $targetHost);
         foreach (['A', 'AAAA', 'CNAME'] as $type) {
-            $output = digQuery($type, $targetHost);
+            $output = digQuery($type, $targetHost, 2, $dnsServer);
             if (!$output) continue;
             foreach (explode("\n", trim($output)) as $val) {
                 $val = trim($val); if (empty($val)) continue;
@@ -2404,11 +2421,11 @@ function performLookup($domain, $options = []) {
     }
 
     // Process core DNS checks
-    processDnsChecks(DNS_CHECKS_CORE, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, $check_map, $raw_records);
+    processDnsChecks(DNS_CHECKS_CORE, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, $check_map, $raw_records, $dnsServer);
 
     // Phase 3: Email & DKIM records
     $progress('Scanning email & DKIM records...');
-    processDnsChecks(DNS_CHECKS_EMAIL, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, $check_map, $raw_records);
+    processDnsChecks(DNS_CHECKS_EMAIL, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, $check_map, $raw_records, $dnsServer);
 
     // Build zone file
     $cname_hosts = [];
@@ -2456,7 +2473,10 @@ function performLookup($domain, $options = []) {
             }
         }
         $ip_lookup[$ip] = $res ?: 'N/A';
-        $ptr = trim(shell_exec("dig -x " . escapeshellarg($ip) . " +short 2>/dev/null") ?: '');
+        $ptrCmd = "dig -x " . escapeshellarg($ip) . " +short";
+        if ($dnsServer) $ptrCmd .= " @" . escapeshellarg($dnsServer);
+        $ptrCmd .= " 2>/dev/null";
+        $ptr = trim(shell_exec($ptrCmd) ?: '');
         $ptr = rtrim($ptr, '.');
         if ($ptr && !empty($ptr)) {
             $forwardIps = @gethostbynamel($ptr);
@@ -2481,8 +2501,8 @@ function performLookup($domain, $options = []) {
 
     $headers = [];
     $httpStatus = 0;
-    $h_out = shell_exec("curl -I -s -L --max-time 3 -A " . escapeshellarg($browserUA) . " " . escapeshellarg("https://".$targetHost));
-    if (!$h_out) $h_out = shell_exec("curl -I -s -L --max-time 2 -A " . escapeshellarg($browserUA) . " " . escapeshellarg("http://".$targetHost));
+    $h_out = shell_exec("curl -sS -D - -o /dev/null -L --max-time 5 -A " . escapeshellarg($browserUA) . " " . escapeshellarg("https://".$targetHost) . " 2>/dev/null");
+    if (!$h_out) $h_out = shell_exec("curl -sS -D - -o /dev/null -L --max-time 5 -A " . escapeshellarg($browserUA) . " " . escapeshellarg("http://".$targetHost) . " 2>/dev/null");
     if($h_out) {
         foreach(explode("\n", $h_out) as $line) {
             // Capture HTTP status from status line
@@ -2567,7 +2587,7 @@ function performLookup($domain, $options = []) {
             }
 
             // Re-fetch headers from redirect target
-            $h_out = shell_exec("curl -I -s -L --max-time 3 -A " . escapeshellarg($browserUA) . " " . escapeshellarg($targetUrl));
+            $h_out = shell_exec("curl -sS -D - -o /dev/null -L --max-time 5 -A " . escapeshellarg($browserUA) . " " . escapeshellarg($targetUrl) . " 2>/dev/null");
             if ($h_out) {
                 $headers = [];
                 foreach (explode("\n", $h_out) as $line) {
@@ -4716,8 +4736,13 @@ if (isset($_GET['scan'])) {
     while (ob_get_level()) ob_end_flush();
     ob_implicit_flush(true);
 
+    $dnsServer = isset($_GET['dns_server']) ? trim($_GET['dns_server']) : null;
+    if ($dnsServer && !preg_match('/^[a-zA-Z0-9._:-]+$/', $dnsServer)) {
+        $dnsServer = null;
+    }
+
     try {
-        $result = performLookup($domain, ['sse' => true, 'save_db' => true]);
+        $result = performLookup($domain, ['sse' => true, 'save_db' => true, 'dns_server' => $dnsServer]);
         sendComplete($result);
     } catch (Exception $e) {
         sendError($e->getMessage());
@@ -4725,4 +4750,12 @@ if (isset($_GET['scan'])) {
     exit;
 }
 
-if(isset($_GET['domain'])) { echo json_encode(performLookup($_GET['domain'])); } else { echo json_encode(['error' => 'No domain provided']); }
+if(isset($_GET['domain'])) {
+    $dnsServer = isset($_GET['dns_server']) ? trim($_GET['dns_server']) : null;
+    if ($dnsServer && !preg_match('/^[a-zA-Z0-9._:-]+$/', $dnsServer)) {
+        $dnsServer = null;
+    }
+    echo json_encode(performLookup($_GET['domain'], ['dns_server' => $dnsServer]));
+} else {
+    echo json_encode(['error' => 'No domain provided']);
+}
