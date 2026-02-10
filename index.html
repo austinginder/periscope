@@ -326,6 +326,12 @@
                         title="Export as HTML report">
                         <span class="mdi mdi-file-export-outline mr-1"></span> Export
                     </button>
+                    <button v-if="localMode && response.raw_available && currentHistoryId" @click="refreshReport()"
+                        class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors border border-slate-200 dark:border-slate-700"
+                        :class="{ 'opacity-50 pointer-events-none': refreshingReport }"
+                        title="Reprocess report from raw scan data">
+                        <span class="mdi mdi-refresh" :class="{ 'animate-spin': refreshingReport }"></span>
+                    </button>
                 </div>
 
                 <!-- Custom DNS Server indicator -->
@@ -1832,6 +1838,7 @@
                     historyFilters: { existence: 'all', platform: 'all', scanCount: 'all', indexability: 'all' },
                     availablePlatforms: [],
                     scanCountOptions: [],
+                    refreshingReport: false,
                     snackbar: { show: false, message: "" },
                     contextMenu: { show: false, x: 0, y: 0, value: '' },
                     dialog: { show: false, title: '', content: '', tabs: null, activeTab: null },
@@ -1920,6 +1927,11 @@
                     if (!m.meta_tags?.twitter) count++;
                     if (!m.favicon?.present) count++;
                     return count;
+                },
+                currentHistoryId() {
+                    if (!this.response.timestamp || !this.domainVersions.length) return null;
+                    const match = this.domainVersions.find(v => v.timestamp == this.response.timestamp);
+                    return match ? match.id : null;
                 },
                 otherVersions() {
                     if (!this.response.timestamp) return [];
@@ -3129,6 +3141,23 @@
                             }
                         })
                         .catch(() => { /* Silent fail for background regeneration */ });
+                },
+                refreshReport() {
+                    if (!this.currentHistoryId || this.refreshingReport) return;
+                    this.refreshingReport = true;
+                    fetch(this.getUrl(`action=regenerate_cache&id=${this.currentHistoryId}`))
+                        .then(r => r.json())
+                        .then(result => {
+                            this.refreshingReport = false;
+                            if (result.success && result.data) {
+                                this.response = result.data;
+                                this.$nextTick(() => { Prism.highlightAll() });
+                                this.showToast('Report refreshed');
+                            } else {
+                                this.showToast('Refresh failed');
+                            }
+                        })
+                        .catch(() => { this.refreshingReport = false; this.showToast('Refresh failed'); });
                 },
                 finishLoad(item, data) {
                     this.response = data; if (!this.response.timestamp) this.response.timestamp = item.timestamp;

@@ -860,7 +860,7 @@ function getRawSSL($domain) {
     return shell_exec("echo | openssl s_client -servername " . escapeshellarg($domain) . " -connect " . escapeshellarg($domain) . ":443 2>/dev/null | openssl x509 -noout -dates -issuer -subject 2>/dev/null");
 }
 
-function detectCMS($domain, $html = null, $headers = []) {
+function detectCMS($domain, $html = null, $headers = [], $robotsTxt = null, $sitemapXml = null) {
     if ($html === null) {
         $html = @file_get_contents("https://" . $domain, false, stream_context_create([
             'http' => ['timeout' => 3, 'ignore_errors' => true],
@@ -893,6 +893,14 @@ function detectCMS($domain, $html = null, $headers = []) {
             // Common WordPress Link header for REST API
             if (stripos($k, 'link') !== false && stripos($v, 'api.w.org') !== false) $is_wp = true;
         }
+    }
+
+    // 6. Metadata fallback: robots.txt and sitemap.xml signals
+    if (!$is_wp && $robotsTxt) {
+        if (preg_match('/wp-json|rest_route|YOAST/i', $robotsTxt)) $is_wp = true;
+    }
+    if (!$is_wp && $sitemapXml) {
+        if (preg_match('/wp-content|wordpress-seo|Yoast SEO/i', $sitemapXml)) $is_wp = true;
     }
 
     // WordPress
@@ -2149,6 +2157,7 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
     $metadataRawFiles = [];
     $metadata = detectMetadata($domain, $html, $metadataRawFiles);
     $robotsTxtContent = $raw['robots_txt'] ?? ($metadataRawFiles['robots_txt'] ?? null);
+    $sitemapXmlContent = $raw['sitemap_xml'] ?? ($metadataRawFiles['sitemap_xml'] ?? null);
 
     // Build request info from redirect chain (if available)
     $redirectChain = $raw['redirect_chain'] ?? [];
@@ -2201,7 +2210,7 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
         'http_headers' => $headers,
         'request' => $requestInfo,
         'ssl' => getSSLInfo($domain, $rawSsl),
-        'cms' => detectCMS($domain, $html, $headers),
+        'cms' => detectCMS($domain, $html, $headers, $robotsTxtContent, $sitemapXmlContent),
         'infrastructure' => detectInfrastructure($headers),
         'security' => detectSecurityHeaders($headers),
         'technology' => detectTechnology($html, $headers),
@@ -2497,7 +2506,7 @@ function performLookup($domain, $options = []) {
     }
 
     // Browser-like User-Agent for requests that may be blocked by bot detection
-    $browserUA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+    $browserUA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
     $headers = [];
     $httpStatus = 0;
@@ -2639,12 +2648,12 @@ function performLookup($domain, $options = []) {
     $analysisHost = $htmlRedirectHost ?: $targetHost;
     $progress('Analyzing results...');
     $ssl = getSSLInfo($sslHost, $rawSsl);
-    $cms = detectCMS($analysisHost, $html, $headers);
+    $metadataRawFiles = [];
+    $metadata = detectMetadata($analysisHost, $html, $metadataRawFiles, $targetHost);
+    $cms = detectCMS($analysisHost, $html, $headers, $metadataRawFiles['robots_txt'] ?? null, $metadataRawFiles['sitemap_xml'] ?? null);
     $infra = detectInfrastructure($headers);
     $security = detectSecurityHeaders($headers);
     $technology = detectTechnology($html, $headers);
-    $metadataRawFiles = [];
-    $metadata = detectMetadata($analysisHost, $html, $metadataRawFiles, $targetHost);
     $indexability = detectSearchEngineBlocking($html, $headers, $metadataRawFiles['robots_txt'] ?? null);
 
     $scanPath = getScanPath($targetHost, $timestamp);
