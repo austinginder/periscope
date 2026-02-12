@@ -183,8 +183,14 @@
                 <div v-if="loading && !loadingFromHistory" class="mt-4 animate-fade-in-up">
                     <div class="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
                         <span>{{ progress.message }}</span>
-                        <span>{{ progress.step }}/{{ progress.total }}</span>
+                        <span class="flex items-center gap-2">
+                            <span>{{ progress.step }}/{{ progress.total }}</span>
+                            <button @click="stopScan" class="text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors" title="Stop scan">
+                                <span class="mdi mdi-stop-circle-outline text-base leading-none"></span>
+                            </button>
+                        </span>
                     </div>
+                    <div v-if="progress.detail" class="text-xs text-slate-400 dark:text-slate-500 mb-1 font-mono truncate">{{ progress.detail }}</div>
                     <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
                         <div class="bg-gradient-to-r from-cyan-500 to-sky-500 h-2 rounded-full transition-all duration-300 ease-out"
                              :style="{ width: progress.percent + '%' }"></div>
@@ -1825,7 +1831,8 @@
                     loading: false,
                     loadingText: "Scanning...",
                     loadingFromHistory: false,
-                    progress: { step: 0, total: 7, percent: 0, message: '' },
+                    activeEventSource: null,
+                    progress: { step: 0, total: 7, percent: 0, message: '', detail: '' },
                     localMode: false,
                     bridgeConnected: null,
                     bridgeHasDb: false,
@@ -2626,6 +2633,14 @@
                     // Lowercase
                     return domain.toLowerCase();
                 },
+                stopScan() {
+                    if (this.activeEventSource) {
+                        this.activeEventSource.close();
+                        this.activeEventSource = null;
+                    }
+                    this.loading = false;
+                    this.progress = { step: 0, total: 7, percent: 0, message: '', detail: '' };
+                },
                 lookupDomain() {
                     if (!this.domain) return;
                     // Normalize input and update the field
@@ -2656,6 +2671,7 @@
                     // Check if EventSource is supported
                     if (typeof EventSource !== 'undefined') {
                         const eventSource = new EventSource(sseUrl);
+                        this.activeEventSource = eventSource;
 
                         eventSource.onmessage = (event) => {
                             try {
@@ -2666,12 +2682,14 @@
                                         step: payload.step,
                                         total: payload.total,
                                         percent: payload.percent,
-                                        message: payload.message
+                                        message: payload.message,
+                                        detail: payload.detail || ''
                                     };
                                 } else if (payload.type === 'complete') {
                                     eventSource.close();
+                                    this.activeEventSource = null;
                                     this.loading = false;
-                                    this.progress = { step: 0, total: 7, percent: 0, message: '' };
+                                    this.progress = { step: 0, total: 7, percent: 0, message: '', detail: '' };
 
                                     const data = payload.data;
                                     if (data.errors && data.errors.length > 0) {
@@ -2684,23 +2702,26 @@
                                     }
                                 } else if (payload.type === 'error') {
                                     eventSource.close();
+                                    this.activeEventSource = null;
                                     this.loading = false;
-                                    this.progress = { step: 0, total: 7, percent: 0, message: '' };
+                                    this.progress = { step: 0, total: 7, percent: 0, message: '', detail: '' };
                                     this.response.errors.push(`<strong>Scan Error:</strong><br/>${payload.message}`);
                                 }
                             } catch (e) {
                                 // JSON parse failed
                                 eventSource.close();
+                                this.activeEventSource = null;
                                 this.loading = false;
-                                this.progress = { step: 0, total: 7, percent: 0, message: '' };
+                                this.progress = { step: 0, total: 7, percent: 0, message: '', detail: '' };
                                 this.response.errors.push(`<strong>Server Error:</strong><br/>${event.data}`);
                             }
                         };
 
                         eventSource.onerror = (e) => {
                             eventSource.close();
+                            this.activeEventSource = null;
                             this.loading = false;
-                            this.progress = { step: 0, total: 7, percent: 0, message: '' };
+                            this.progress = { step: 0, total: 7, percent: 0, message: '', detail: '' };
                             const url = this.localMode ? 'http://127.0.0.1:8989' : window.location.origin;
                             this.response.errors.push(`<strong>Network Connection Failed</strong><br/><span class="text-red-600/70 dark:text-red-300/70">Could not connect to ${url}</span><br/><button onclick="document.querySelector('#app').__vue_app__._instance.proxy.lookupDomain()" class="mt-2 text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:underline">Retry Connection</button>`);
                         };
@@ -2714,7 +2735,7 @@
                                 try {
                                     const data = JSON.parse(text);
                                     this.loading = false;
-                                    this.progress = { step: 0, total: 7, percent: 0, message: '' };
+                                    this.progress = { step: 0, total: 7, percent: 0, message: '', detail: '' };
 
                                     if (data.errors && data.errors.length > 0) {
                                         this.response.errors = data.errors;
@@ -2726,13 +2747,13 @@
                                     }
                                 } catch (e) {
                                     this.loading = false;
-                                    this.progress = { step: 0, total: 7, percent: 0, message: '' };
+                                    this.progress = { step: 0, total: 7, percent: 0, message: '', detail: '' };
                                     this.response.errors.push(`<strong>Server Error:</strong><br/>${text}`);
                                 }
                             })
                             .catch(e => {
                                 this.loading = false;
-                                this.progress = { step: 0, total: 7, percent: 0, message: '' };
+                                this.progress = { step: 0, total: 7, percent: 0, message: '', detail: '' };
                                 const url = this.localMode ? 'http://127.0.0.1:8989' : window.location.origin;
                                 this.response.errors.push(`<strong>Network Connection Failed</strong><br/><span class="text-red-600/70 dark:text-red-300/70">Could not connect to ${url}</span><br/><button onclick="document.querySelector('#app').__vue_app__._instance.proxy.lookupDomain()" class="mt-2 text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:underline">Retry Connection</button>`);
                             });

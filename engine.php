@@ -106,6 +106,7 @@ const DNS_CHECKS_CORE = [
     ['type' => 'A', 'name' => 'internal'], ['type' => 'A', 'name' => 'intranet'],
     ['type' => 'A', 'name' => 'gateway'], ['type' => 'A', 'name' => 'proxy'],
     ['type' => 'A', 'name' => 'git'], ['type' => 'A', 'name' => 'gitlab'], ['type' => 'A', 'name' => 'jenkins'], ['type' => 'A', 'name' => 'ci'],
+    ['type' => 'TXT', 'name' => 'www'],
     // Microsoft / Office 365
     ['type' => 'CNAME', 'name' => 'cdn'], ['type' => 'CNAME', 'name' => 'status'],
     ['type' => 'CNAME', 'name' => 'autodiscover'], ['type' => 'CNAME', 'name' => 'lyncdiscover'], ['type' => 'CNAME', 'name' => 'sip'],
@@ -661,9 +662,9 @@ function getWhois($domain, $rdapJson = null) {
 /**
  * Run a dig query with retry on timeout and filter out error messages
  */
-function digQuery($type, $host, $retries = 2, $dnsServer = null) {
+function digQuery($type, $host, $retries = 2, $dnsServer = null, $timeout = 3) {
     for ($i = 0; $i < $retries; $i++) {
-        $cmd = "dig +short +time=3 +tries=1 -t " . escapeshellarg($type) . " " . escapeshellarg($host);
+        $cmd = "dig +short +time=" . intval($timeout) . " +tries=1 -t " . escapeshellarg($type) . " " . escapeshellarg($host);
         if ($dnsServer) {
             $cmd .= " @" . escapeshellarg($dnsServer);
         }
@@ -2241,20 +2242,19 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
 }
 
 // Helper function to process DNS checks with deduplication
-function processDnsChecks($checks, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, &$check_map, &$raw_records, $dnsServer = null) {
+function processDnsChecks($checks, $rootDomain, $wildcardAValues, $wildcardTXTValue, $wildcardCNAMEValue, &$check_map, &$raw_records, $dnsServer = null, $progressUpdate = null) {
     foreach ($checks as $check) {
         $type = $check['type']; $name = $check['name'];
 
-        // Skip subdomain A record checks if wildcard A exists
-        if ($hasWildcardA && $type === 'A' && !empty($name) && $name !== 'www') {
-            continue;
-        }
-
         $host = $name ? "$name.$rootDomain" : $rootDomain;
+        $isWildcardSubA = ($type === 'A' && !empty($wildcardAValues) && !empty($name) && $name !== 'www');
 
-        // Check for CNAME before A/AAAA/TXT queries
-        if (($type === 'A' || $type === 'AAAA' || $type === 'TXT') && !empty($name) && $type !== 'CNAME') {
-            $cnameOutput = digQuery('CNAME', $host, 2, $dnsServer);
+        if ($progressUpdate) $progressUpdate('', "dig $type $host");
+
+        // Check for CNAME before A/AAAA/TXT queries (skip for subdomain A when wildcard A exists)
+        if (($type === 'A' || $type === 'AAAA' || $type === 'TXT') && !empty($name) && $type !== 'CNAME'
+            && !$isWildcardSubA) {
+            $cnameOutput = digQuery('CNAME', $host, 1, $dnsServer, 2);
             if ($cnameOutput && !empty(trim($cnameOutput))) {
                 $cnameVal = trim(explode("\n", trim($cnameOutput))[0]);
                 if ($wildcardCNAMEValue !== null && $cnameVal === $wildcardCNAMEValue) continue;
@@ -2267,11 +2267,15 @@ function processDnsChecks($checks, $rootDomain, $hasWildcardA, $wildcardTXTValue
             }
         }
 
-        $output = digQuery($type, $host, 2, $dnsServer);
+        // Use single retry and shorter timeout for wildcard subdomain A checks (just detecting differences)
+        $output = $isWildcardSubA
+            ? digQuery($type, $host, 1, $dnsServer, 2)
+            : digQuery($type, $host, 2, $dnsServer);
         if (!$output) continue;
         foreach (explode("\n", trim($output)) as $val) {
             $val = trim($val); if (empty($val)) continue;
             if (($type === 'A' || $type === 'AAAA') && preg_match('/[a-zA-Z]/', $val)) continue;
+            if ($type === 'A' && !empty($wildcardAValues) && !empty($name) && $name !== 'www' && in_array($val, $wildcardAValues, true)) continue;
             if ($type === 'TXT' && $wildcardTXTValue !== null && !empty($name) && $val === $wildcardTXTValue) continue;
             if ($wildcardCNAMEValue !== null && !empty($name) && $name !== '*' && $val === $wildcardCNAMEValue) continue;
             
@@ -2322,12 +2326,13 @@ function performLookup($domain, $options = []) {
     $currentStep = 0;
 
     // Progress reporting closures
+    $lastProgressMsg = '';
     $progress = $useSSE
-        ? function($msg) use (&$currentStep, $totalSteps) { sendProgress(++$currentStep, $totalSteps, $msg); }
-        : function($msg) { cliProgress($msg); };
+        ? function($msg) use (&$currentStep, $totalSteps, &$lastProgressMsg) { $lastProgressMsg = $msg; sendProgress(++$currentStep, $totalSteps, $msg); }
+        : function($msg) use (&$lastProgressMsg) { $lastProgressMsg = $msg; cliProgress($msg); };
     $progressUpdate = $useSSE
-        ? function($msg) use (&$currentStep, $totalSteps) { sendProgress($currentStep, $totalSteps, $msg); }
-        : function($msg) { cliProgress($msg); };
+        ? function($msg, $detail = '') use (&$currentStep, $totalSteps, &$lastProgressMsg) { sendProgress($currentStep, $totalSteps, $msg ?: $lastProgressMsg, $detail); }
+        : function($msg, $detail = '') { cliProgress($detail ?: $msg); };
     $progressDone = $useSSE
         ? function($msg) {} // SSE doesn't need "done" messages
         : function($msg) { cliProgressDone($msg); };
@@ -2381,11 +2386,12 @@ function performLookup($domain, $options = []) {
 
     // Check wildcards
     $wildcardA = digQuery('A', "*.$rootDomain", 2, $dnsServer);
-    $hasWildcardA = !empty(trim($wildcardA));
-    if ($hasWildcardA) {
+    $wildcardAValues = [];
+    if (!empty(trim($wildcardA))) {
         foreach (explode("\n", trim($wildcardA)) as $val) {
             $val = trim($val); if (empty($val)) continue;
             if (preg_match('/[a-zA-Z]/', $val) && substr($val, -1) === '.') continue;
+            $wildcardAValues[] = $val;
             $key = "A|*|$val"; if (isset($check_map[$key])) continue;
             $check_map[$key] = true;
             $raw_records[] = ['type' => 'A', 'name' => '*', 'value' => $val];
@@ -2430,11 +2436,11 @@ function performLookup($domain, $options = []) {
     }
 
     // Process core DNS checks
-    processDnsChecks(DNS_CHECKS_CORE, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, $check_map, $raw_records, $dnsServer);
+    processDnsChecks(DNS_CHECKS_CORE, $rootDomain, $wildcardAValues, $wildcardTXTValue, $wildcardCNAMEValue, $check_map, $raw_records, $dnsServer, $progressUpdate);
 
     // Phase 3: Email & DKIM records
     $progress('Scanning email & DKIM records...');
-    processDnsChecks(DNS_CHECKS_EMAIL, $rootDomain, $hasWildcardA, $wildcardTXTValue, $wildcardCNAMEValue, $check_map, $raw_records, $dnsServer);
+    processDnsChecks(DNS_CHECKS_EMAIL, $rootDomain, $wildcardAValues, $wildcardTXTValue, $wildcardCNAMEValue, $check_map, $raw_records, $dnsServer, $progressUpdate);
 
     // Build zone file
     $cname_hosts = [];
@@ -2702,12 +2708,13 @@ function performLookup($domain, $options = []) {
 }
 
 // --- SSE PROGRESS HELPERS ---
-function sendProgress($step, $total, $message) {
+function sendProgress($step, $total, $message, $detail = '') {
     echo "data: " . json_encode([
         'type' => 'progress',
         'step' => $step,
         'total' => $total,
         'message' => $message,
+        'detail' => $detail,
         'percent' => round(($step / $total) * 100)
     ]) . "\n\n";
     @ob_flush();
