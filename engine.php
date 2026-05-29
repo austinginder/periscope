@@ -85,7 +85,8 @@ const DNS_CHECKS_CORE = [
     ['type' => 'TLSA', 'name' => '_443._tcp'], ['type' => 'TLSA', 'name' => '_25._tcp'],
     // Common subdomains
     ['type' => 'A', 'name' => 'mail'], ['type' => 'A', 'name' => 'webmail'], ['type' => 'A', 'name' => 'smtp'],
-    ['type' => 'A', 'name' => 'imap'], ['type' => 'A', 'name' => 'ftp'], ['type' => 'A', 'name' => 'cpanel'],
+    ['type' => 'A', 'name' => 'imap'], ['type' => 'A', 'name' => 'pop'], ['type' => 'A', 'name' => 'email'],
+    ['type' => 'A', 'name' => 'ftp'], ['type' => 'A', 'name' => 'cpanel'],
     ['type' => 'A', 'name' => 'whm'], ['type' => 'A', 'name' => 'plesk'], ['type' => 'A', 'name' => 'blog'],
     ['type' => 'A', 'name' => 'shop'], ['type' => 'A', 'name' => 'portal'], ['type' => 'A', 'name' => 'dev'],
     ['type' => 'A', 'name' => 'api'], ['type' => 'A', 'name' => 'app'], ['type' => 'A', 'name' => 'remote'],
@@ -108,7 +109,7 @@ const DNS_CHECKS_CORE = [
     ['type' => 'A', 'name' => 'git'], ['type' => 'A', 'name' => 'gitlab'], ['type' => 'A', 'name' => 'jenkins'], ['type' => 'A', 'name' => 'ci'],
     ['type' => 'TXT', 'name' => 'www'],
     // Microsoft / Office 365
-    ['type' => 'CNAME', 'name' => 'cdn'], ['type' => 'CNAME', 'name' => 'status'],
+    ['type' => 'CNAME', 'name' => 'cdn'], ['type' => 'CNAME', 'name' => 'status'], ['type' => 'CNAME', 'name' => '_domainconnect'],
     ['type' => 'CNAME', 'name' => 'autodiscover'], ['type' => 'CNAME', 'name' => 'lyncdiscover'], ['type' => 'CNAME', 'name' => 'sip'],
     ['type' => 'CNAME', 'name' => 'enterpriseregistration'], ['type' => 'CNAME', 'name' => 'enterpriseenrollment'], ['type' => 'CNAME', 'name' => 'msoid'],
     ['type' => 'SRV', 'name' => '_sip._tls'], ['type' => 'SRV', 'name' => '_sipfederationtls._tcp'], ['type' => 'SRV', 'name' => '_autodiscover._tcp'],
@@ -477,6 +478,59 @@ function loadRawFiles($path) {
 function hasRawFiles($domain, $timestamp) {
     $path = getScanPath($domain, $timestamp);
     return is_dir($path);
+}
+
+// Open a file or URL in the user's default browser. Mirrors boot.sh's launch
+// detection (macOS `open`, WSL `wslview`/`cmd.exe`, Linux `xdg-open`) and runs
+// detached so the CLI returns immediately.
+function openInBrowser($target) {
+    if (PHP_OS_FAMILY === 'Darwin') {
+        shell_exec('open ' . escapeshellarg($target) . ' > /dev/null 2>&1 &');
+        return;
+    }
+    if (PHP_OS_FAMILY === 'Windows') {
+        shell_exec('start "" ' . escapeshellarg($target));
+        return;
+    }
+    // Linux / WSL
+    $isWsl = @is_file('/proc/version') && stripos((string)@file_get_contents('/proc/version'), 'microsoft') !== false;
+    if ($isWsl) {
+        if (trim((string)shell_exec('command -v wslview 2>/dev/null')) !== '') {
+            shell_exec('wslview ' . escapeshellarg($target) . ' > /dev/null 2>&1 &');
+        } else {
+            shell_exec('cmd.exe /c start "" ' . escapeshellarg($target) . ' > /dev/null 2>&1 &');
+        }
+        return;
+    }
+    shell_exec('xdg-open ' . escapeshellarg($target) . ' > /dev/null 2>&1 &');
+}
+
+// Is something listening on the local bridge port? Lightweight liveness check
+// (a raw socket connect — avoids the check_status action, which walks the whole
+// scans dir). Used only for an advisory hint when opening the report URL.
+function bridgeRunning($port = 8989) {
+    $fp = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.3);
+    if ($fp) { fclose($fp); return true; }
+    return false;
+}
+
+// Most recent saved scan timestamp for a host (newest scan dir that has a
+// usable response cache). Returns null when the host has no cached scan.
+function mostRecentScanTimestamp($host) {
+    if (empty($host)) return null;
+    $dir = getenv('HOME') . "/.periscope/scans/$host";
+    if (!is_dir($dir)) return null;
+    $timestamps = [];
+    foreach (glob("$dir/*", GLOB_ONLYDIR) as $d) {
+        $b = basename($d);
+        if (ctype_digit($b)) $timestamps[] = (int)$b;
+    }
+    if (empty($timestamps)) return null;
+    rsort($timestamps);
+    foreach ($timestamps as $ts) {
+        if (file_exists("$dir/$ts/response.json")) return $ts;
+    }
+    return null;
 }
 
 function getRawWhoisDomain($domain) {
@@ -890,6 +944,7 @@ function detectCMS($domain, $html = null, $headers = [], $robotsTxt = null, $sit
     // 5. Header Check
     if (!$is_wp && !empty($headers)) {
         foreach ($headers as $k => $v) {
+            if (is_array($v)) continue;
             if (stripos($k, 'x-powered-by') !== false && stripos($v, 'WordPress') !== false) $is_wp = true;
             // Common WordPress Link header for REST API
             if (stripos($k, 'link') !== false && stripos($v, 'api.w.org') !== false) $is_wp = true;
@@ -1413,6 +1468,64 @@ function detectSecurityHeaders($headers) {
     return $result;
 }
 
+function analyzeCookieSecurity($headers) {
+    $h = array_change_key_case($headers, CASE_LOWER);
+    if (!isset($h['set-cookie'])) return null;
+
+    $rawCookies = is_array($h['set-cookie']) ? $h['set-cookie'] : [$h['set-cookie']];
+    if (empty($rawCookies)) return null;
+
+    $sessionPatterns = '/^(PHPSESSID|JSESSIONID|ASP\.NET_SessionId|connect\.sid|rack\.session|django_session|laravel_session|CFID|CFTOKEN|ci_session|wp_sec|SERVERID|session_id|sid|sess_id)/i';
+
+    $cookies = [];
+    foreach ($rawCookies as $raw) {
+        $parts = explode(';', $raw);
+        $nameValue = trim($parts[0]);
+        $eqPos = strpos($nameValue, '=');
+        $name = $eqPos !== false ? substr($nameValue, 0, $eqPos) : $nameValue;
+
+        $flags = strtolower($raw);
+        $secure = stripos($flags, '; secure') !== false || stripos($flags, ';secure') !== false;
+        $httponly = stripos($flags, '; httponly') !== false || stripos($flags, ';httponly') !== false;
+        $samesite = null;
+        if (preg_match('/;\s*samesite\s*=\s*(strict|lax|none)/i', $raw, $m)) {
+            $samesite = ucfirst(strtolower($m[1]));
+        }
+        $isSession = (bool)preg_match($sessionPatterns, $name);
+
+        $cookies[] = [
+            'name' => $name,
+            'secure' => $secure,
+            'httponly' => $httponly,
+            'samesite' => $samesite,
+            'session' => $isSession
+        ];
+    }
+
+    // Score based on session cookies only
+    $sessionCookies = array_filter($cookies, fn($c) => $c['session']);
+    if (empty($sessionCookies)) {
+        // No session cookies — still show cookie info but perfect score
+        return ['cookies' => $cookies, 'issues' => [], 'score' => null];
+    }
+
+    $issues = [];
+    $allSecure = true; $allHttpOnly = true; $allSameSite = true;
+    foreach ($sessionCookies as $c) {
+        if (!$c['secure']) { $allSecure = false; $issues[] = 'Session cookie "' . $c['name'] . '" missing Secure flag'; }
+        if (!$c['httponly']) { $allHttpOnly = false; $issues[] = 'Session cookie "' . $c['name'] . '" missing HttpOnly flag'; }
+        if (!$c['samesite']) { $allSameSite = false; $issues[] = 'Session cookie "' . $c['name'] . '" missing SameSite attribute'; }
+    }
+
+    $score = ($allSecure ? 1 : 0) + ($allHttpOnly ? 1 : 0) + ($allSameSite ? 1 : 0);
+
+    return [
+        'cookies' => $cookies,
+        'issues' => $issues,
+        'score' => ['value' => $score, 'total' => 3]
+    ];
+}
+
 function detectTechnology($html, $headers = []) {
     $result = ['frameworks' => [], 'analytics' => [], 'ecommerce' => [], 'widgets' => []];
     if (!$html) return $result;
@@ -1458,8 +1571,9 @@ function detectTechnology($html, $headers = []) {
     if (preg_match('/cdn\.segment\.com\/analytics\.js/i', $html)) $result['analytics'][] = ['name' => 'Segment', 'id' => null];
     if (preg_match('/connect\.facebook\.net\/[^\/]+\/fbevents\.js/i', $html)) $result['analytics'][] = ['name' => 'Facebook Pixel', 'id' => null];
 
-    if (preg_match('/<script[^>]+type=["\']text\/x-magento-init["\']|Mage\.Cookies|static\/version[a-z0-9]+\/frontend/i', $html) || 
-        (isset($h['set-cookie']) && stripos($h['set-cookie'], 'mage-') !== false)) {
+    $setCookieStr = isset($h['set-cookie']) ? (is_array($h['set-cookie']) ? implode(' ', $h['set-cookie']) : $h['set-cookie']) : '';
+    if (preg_match('/<script[^>]+type=["\']text\/x-magento-init["\']|Mage\.Cookies|static\/version[a-z0-9]+\/frontend/i', $html) ||
+        ($setCookieStr && stripos($setCookieStr, 'mage-') !== false)) {
         $result['ecommerce'][] = 'Magento';
     }
     if (preg_match('/cdn\.shopify\.com|Shopify\.theme/i', $html)) $result['ecommerce'][] = 'Shopify';
@@ -2063,6 +2177,7 @@ function detectSearchEngineBlocking($html, $headers, $robotsTxt = null) {
 
     // Check X-Robots-Tag header
     foreach ($headers as $name => $value) {
+        if (is_array($value)) continue;
         if (strtolower($name) === 'x-robots-tag') {
             if (preg_match('/noindex/i', $value)) {
                 $result['blocked'] = true;
@@ -2214,6 +2329,7 @@ function computeFromRaw($raw, $domain, $timestamp = null, $saveCache = true) {
         'cms' => detectCMS($domain, $html, $headers, $robotsTxtContent, $sitemapXmlContent),
         'infrastructure' => detectInfrastructure($headers),
         'security' => detectSecurityHeaders($headers),
+        'cookie_security' => analyzeCookieSecurity($headers),
         'technology' => detectTechnology($html, $headers),
         'metadata' => $metadata,
         'redirect_chain' => $redirectChain,
@@ -2524,7 +2640,15 @@ function performLookup($domain, $options = []) {
             if (preg_match('/^HTTP\/[\d.]+ (\d+)/', $line, $m)) {
                 $httpStatus = (int)$m[1];
             }
-            if(strpos($line, ':')) { [$k, $v] = explode(':', $line, 2); $headers[trim($k)] = trim($v); }
+            if(strpos($line, ':')) {
+                [$k, $v] = explode(':', $line, 2);
+                $key = trim($k); $val = trim($v);
+                if (strtolower($key) === 'set-cookie') {
+                    if (!isset($headers[$key])) { $headers[$key] = [$val]; } else { $headers[$key][] = $val; }
+                } else {
+                    $headers[$key] = $val;
+                }
+            }
         }
     }
 
@@ -2614,7 +2738,12 @@ function performLookup($domain, $options = []) {
                     }
                     if (strpos($line, ':') !== false) {
                         list($k, $v) = explode(':', $line, 2);
-                        $headers[strtolower(trim($k))] = trim($v);
+                        $key = strtolower(trim($k)); $val = trim($v);
+                        if ($key === 'set-cookie') {
+                            if (!isset($headers[$key])) { $headers[$key] = [$val]; } else { $headers[$key][] = $val; }
+                        } else {
+                            $headers[$key] = $val;
+                        }
                     }
                 }
             }
@@ -2659,6 +2788,7 @@ function performLookup($domain, $options = []) {
     $cms = detectCMS($analysisHost, $html, $headers, $metadataRawFiles['robots_txt'] ?? null, $metadataRawFiles['sitemap_xml'] ?? null);
     $infra = detectInfrastructure($headers);
     $security = detectSecurityHeaders($headers);
+    $cookieSecurity = analyzeCookieSecurity($headers);
     $technology = detectTechnology($html, $headers);
     $indexability = detectSearchEngineBlocking($html, $headers, $metadataRawFiles['robots_txt'] ?? null);
 
@@ -2690,6 +2820,7 @@ function performLookup($domain, $options = []) {
         'ip_lookup' => $ip_lookup, 'ptr_records' => $ptrRecords, 'http_headers' => $headers,
         'request' => $requestInfo,
         'ssl' => $ssl, 'cms' => $cms, 'infrastructure' => $infra, 'security' => $security,
+        'cookie_security' => $cookieSecurity,
         'technology' => $technology, 'metadata' => $metadata, 'redirect_chain' => $redirectChain,
         'indexability' => $indexability, 'errors' => [], 'timestamp' => $timestamp,
         'raw_available' => true, 'plugin_version' => PERISCOPE_VERSION
@@ -2768,15 +2899,43 @@ if (php_sapi_name() === 'cli' && !isset($_SERVER['REQUEST_METHOD'])) {
     }
     
     $CLI_MODE = true;
-    $domain = $argv[1];
 
-    // Hide cursor during scan
-    echo "\033[?25l";
-    // Ensure cursor is restored on exit (Ctrl+C, errors, etc.)
-    register_shutdown_function(function() { echo "\033[?25h"; });
+    // Parse flags; the domain is the first non-flag argument (order-independent,
+    // so `engine.php example.com --open` and `engine.php --open example.com` both work)
+    $openReport = false;
+    $skipScan = false;
+    $domain = null;
+    for ($i = 1; $i < $argc; $i++) {
+        if ($argv[$i] === '--open' || $argv[$i] === '-o') { $openReport = true; continue; }
+        if ($argv[$i] === '--skip') { $skipScan = true; continue; }
+        if ($domain === null && substr($argv[$i], 0, 1) !== '-') { $domain = $argv[$i]; }
+    }
+    if ($domain === null) { echo "Usage: php engine.php <domain> [--open] [--skip]\n"; exit(1); }
 
-    echo "\n  🔍 Scanning \033[1m$domain\033[0m\n\n";
-    $data = performLookup($domain, ['save_db' => true]);
+    if ($skipScan) {
+        // --skip: show the most recent saved scan instead of running a new one
+        $host = normalizeInput($domain);
+        $ts = mostRecentScanTimestamp($host);
+        if (!$ts) {
+            echo "\n  \033[31m⚠ No previous scan found for $host — run without --skip first.\033[0m\n";
+            exit(1);
+        }
+        $cache = loadResponseCache(getScanPath($host, $ts));
+        $data = $cache['data'] ?? $cache;
+        if (!$data || !isset($data['target_host'])) {
+            echo "\n  \033[31m⚠ Could not load cached scan for $host.\033[0m\n";
+            exit(1);
+        }
+        echo "\n  📁 Cached scan for \033[1m" . $data['target_host'] . "\033[0m \033[90m(" . formatDate(date('c', (int)$data['timestamp'])) . ")\033[0m\n";
+    } else {
+        // Hide cursor during scan
+        echo "\033[?25l";
+        // Ensure cursor is restored on exit (Ctrl+C, errors, etc.)
+        register_shutdown_function(function() { echo "\033[?25h"; });
+
+        echo "\n  🔍 Scanning \033[1m$domain\033[0m\n\n";
+        $data = performLookup($domain, ['save_db' => true]);
+    }
     $registrar = 'N/A';
     foreach ($data['domain'] as $item) if (stripos($item['name'], 'Registrar') !== false) { $registrar = $item['value']; break; }
     $ips = array_keys($data['ip_lookup']);
@@ -2803,6 +2962,21 @@ if (php_sapi_name() === 'cli' && !isset($_SERVER['REQUEST_METHOD'])) {
         echo "  \033[31m" . implode(', ', $reasons) . "\033[0m\n";
     }
     echo "\n  \033[90mSaved to: ~/.periscope/scans/" . $data['target_host'] . "/" . $data['timestamp'] . "/\033[0m\n";
+
+    // --open: pop the report in the browser. periscope.run with ?local=true talks
+    // to whichever local bridge is running on :8989 and renders the full interactive
+    // report — works whether the engine is installed locally or not, as long as a
+    // bridge is up.
+    if ($openReport) {
+        $host = $data['target_host'];
+        $url = "https://periscope.run/?local=true&domain=" . rawurlencode($host);
+        openInBrowser($url);
+        echo "  \033[90mOpening:  $url\033[0m\n";
+        if (!bridgeRunning()) {
+            echo "  \033[33m⚠ No local bridge detected on :8989 — start one (e.g. boot.sh) so the report can load.\033[0m\n";
+        }
+        echo "\n  \033[32m🔭 Opened report in browser\033[0m\n";
+    }
     exit(0);
 }
 
@@ -4333,7 +4507,37 @@ function render() {
         });
         html += `</div></div>`;
     }
-    
+
+    // Cookie Security
+    if (data.cookie_security && data.cookie_security.cookies && data.cookie_security.cookies.length) {
+        const cs = data.cookie_security;
+        let scoreHtml = "";
+        if (cs.score) {
+            const csClass = cs.score.value === 0 ? "bg-red-900/30 text-red-400" : cs.score.value <= 2 ? "bg-amber-900/30 text-amber-400" : "bg-emerald-900/30 text-emerald-400";
+            scoreHtml = `<span class="text-xs font-bold px-2 py-1 rounded-full ${csClass}">${cs.score.value}/${cs.score.total}</span>`;
+        }
+        html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800 bg-slate-950/30 flex justify-between items-center">
+                <h3 class="text-sm font-semibold text-cyan-50 uppercase tracking-wider"><span class="mdi mdi-cookie-lock mr-1"></span> Cookie Security</h3>
+                ${scoreHtml}
+            </div>
+            <div class="p-4 space-y-2 text-xs">`;
+        cs.cookies.forEach(cookie => {
+            const sessionBadge = cookie.session ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400 font-medium">SESSION</span>` : "";
+            const secureIcon = cookie.secure ? `<span class="text-emerald-400"><span class="mdi mdi-check-circle"></span> Secure</span>` : `<span class="text-red-400"><span class="mdi mdi-close-circle"></span> Secure</span>`;
+            const httponlyIcon = cookie.httponly ? `<span class="text-emerald-400"><span class="mdi mdi-check-circle"></span> HttpOnly</span>` : `<span class="text-red-400"><span class="mdi mdi-close-circle"></span> HttpOnly</span>`;
+            const samesiteIcon = cookie.samesite ? `<span class="text-emerald-400"><span class="mdi mdi-check-circle"></span> SameSite=${esc(cookie.samesite)}</span>` : `<span class="text-red-400"><span class="mdi mdi-close-circle"></span> SameSite</span>`;
+            html += `<div class="border border-slate-800 rounded-lg p-3">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="font-mono font-semibold text-slate-200">${esc(cookie.name)}</span>
+                    ${sessionBadge}
+                </div>
+                <div class="flex gap-4 text-[11px]">${secureIcon} ${httponlyIcon} ${samesiteIcon}</div>
+            </div>`;
+        });
+        html += `</div></div>`;
+    }
+
     // Technology
     if (data.technology && (data.technology.frameworks?.length || data.technology.analytics?.length || data.technology.ecommerce?.length || data.technology.widgets?.length)) {
         html += `<div class="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">

@@ -613,6 +613,42 @@
                         </div>
                     </div>
 
+                    <!-- Cookie Security -->
+                    <div v-if="response.cookie_security && response.cookie_security.cookies && response.cookie_security.cookies.length"
+                        class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex justify-between items-center">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-cyan-50 uppercase tracking-wider">
+                                <span class="mdi mdi-cookie-lock mr-1"></span> Cookie Security
+                            </h3>
+                            <span v-if="response.cookie_security.score" class="text-xs font-bold px-2 py-1 rounded-full" :class="{
+                                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400': response.cookie_security.score.value === 0,
+                                'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400': response.cookie_security.score.value >= 1 && response.cookie_security.score.value <= 2,
+                                'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400': response.cookie_security.score.value === 3
+                            }">{{ response.cookie_security.score.value }}/{{ response.cookie_security.score.total }}</span>
+                        </div>
+                        <div class="p-4 space-y-2 text-xs">
+                            <div v-for="cookie in response.cookie_security.cookies" :key="cookie.name"
+                                class="border border-slate-100 dark:border-slate-800 rounded-lg p-3">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{{ cookie.name }}</span>
+                                    <span v-if="cookie.session" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 font-medium">SESSION</span>
+                                </div>
+                                <div class="flex gap-4 text-[11px]">
+                                    <span :class="cookie.secure ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'">
+                                        <span class="mdi" :class="cookie.secure ? 'mdi-check-circle' : 'mdi-close-circle'"></span> Secure
+                                    </span>
+                                    <span :class="cookie.httponly ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'">
+                                        <span class="mdi" :class="cookie.httponly ? 'mdi-check-circle' : 'mdi-close-circle'"></span> HttpOnly
+                                    </span>
+                                    <span :class="cookie.samesite ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'">
+                                        <span class="mdi" :class="cookie.samesite ? 'mdi-check-circle' : 'mdi-close-circle'"></span>
+                                        SameSite<span v-if="cookie.samesite">={{ cookie.samesite }}</span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Technology Stack -->
                     <div v-if="response.technology && !Array.isArray(response.technology) && (response.technology.frameworks?.length > 0 || response.technology.analytics?.length > 0 || response.technology.ecommerce?.length > 0 || response.technology.widgets?.length > 0)"
                         class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
