@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.5.0] - 2026-05-29
+
+### Added
+
+- **Cookie Security Analysis** - Inspects `Set-Cookie` headers and reports per-cookie `Secure`, `HttpOnly`, and `SameSite` flags, detects session cookies, and scores session-cookie hardening (out of 3) with a list of specific issues. Shown as a new "Cookie Security" card in the report.
+- **CLI `--open` Flag** - `php ~/.periscope/engine.php <domain> --open` runs a scan and then opens the full report in your browser at `periscope.run/?local=true&domain=…`, which talks to your running Local Bridge. Ideal for launchers like Alfred (`periscope example.com`). Flag order doesn't matter, and `-o` is a shorthand.
+- **CLI `--skip` Flag** - `php ~/.periscope/engine.php <domain> --skip` displays the most recent saved scan for a domain instead of running a new one — instant, with no network requests.
+- **Live DNS Progress Detail** - The scan progress now shows the exact record being queried in real time (e.g. `dig A www.example.com`) beneath the progress bar.
+- **Stop Scan Button** - A stop button in the progress indicator cancels an in-progress scan and closes the connection.
+- **Refresh Report Button** - When viewing a saved scan in local mode, a refresh button reprocesses the report from the stored raw scan data without re-running the scan.
+- **Additional DNS Checks** - Added `www` TXT, `pop` and `email` subdomain A records, and the `_domainconnect` CNAME.
+
+### Changed
+
+- **Smarter Wildcard Handling** - When a wildcard (`*`) A record exists, Periscope no longer skips all subdomain A-record checks. It now records the wildcard IPs and only filters subdomain results that match them, so subdomains pointing elsewhere are still discovered. Wildcard-subdomain probes use a single retry and shorter timeout to keep scans fast.
+- **WordPress Detection Fallbacks** - CMS detection now also looks for WordPress signals in `robots.txt` (`wp-json`, `rest_route`, Yoast) and `sitemap.xml` (`wp-content`, `wordpress-seo`, Yoast SEO), catching sites that hide the usual markers.
+- **Updated Browser User-Agent** - Bumped the request User-Agent to Chrome 131 to reduce bot-detection blocks during content fetches.
+- **Configurable DNS Timeout** - `digQuery` now accepts a per-query timeout, used to speed up wildcard-subdomain probes.
+
+### Fixed
+
+- **Dropped `Set-Cookie` Headers** - HTTP header parsing now collects all `Set-Cookie` headers into a list instead of keeping only the last one, so every cookie is captured (and analyzed by the new Cookie Security card). Header iteration and Magento detection were updated to handle the multi-value form.
+
 ## [1.4.2] - 2026-02-08
 
 ### Added
