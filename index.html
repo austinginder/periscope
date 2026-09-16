@@ -162,7 +162,8 @@
         .stack > * + * { margin-top: 16px; }
 
         /* ---- hero / scan bar ---- */
-        .hero { max-width: 760px; margin: 0 auto; transition: margin .5s var(--ease), max-width .5s var(--ease); position: relative; z-index: 30; }
+        .hero { max-width: 760px; margin: 0 auto; transition: margin .5s var(--ease), max-width .5s var(--ease); position: relative; }
+        .hero:has(.dropdown) { z-index: 30; }
         .hero.is-idle { margin-top: clamp(24px, 12vh, 120px); }
         .hero.is-idle .scanbar { height: 60px; }
         .hero-copy { text-align: center; margin-bottom: 22px; }
