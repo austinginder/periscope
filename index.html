@@ -473,6 +473,10 @@
         .ctx button .ic { color: var(--dim); font-size: 15px; }
         .ctx button code { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .ctx .sep { height: 1px; background: var(--line); margin: 4px 6px; }
+        .ctx .ctx-l { padding: 6px 10px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+        .ctx button.on { color: var(--accent); }
+        .ctx button.on .ic { color: var(--accent); }
+        .ctx button .tick { margin-left: auto; font-size: 14px; }
 
         /* ---- toast ---- */
         .toast { position: fixed; right: 20px; bottom: 20px; z-index: 100; display: flex; align-items: center; gap: 16px; padding: 10px 14px 10px 16px; background: var(--text); color: var(--bg); border-radius: var(--r-md); box-shadow: var(--shadow-sm); font-size: 13.5px; font-weight: 500; animation: slide-in .18s var(--ease) both; }
@@ -534,6 +538,7 @@
         <symbol id="i-corner-right" viewBox="0 0 24 24"><path d="M4 19v-7a4 4 0 0 1 4-4h11"/><path d="m15 4 4 4-4 4"/></symbol>
         <symbol id="i-subdir" viewBox="0 0 24 24"><path d="M5 4v7a3 3 0 0 0 3 3h11"/><path d="m15 10 4 4-4 4"/></symbol>
         <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M2.5 12h2M19.5 12h2M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+        <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
         <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
         <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9.5 7V4.5h5V7"/><path d="m6 7 1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></symbol>
         <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 3h8l10 10-8 8L3 11V3Z"/><path d="M7.5 7.5h.01"/></symbol>
@@ -613,6 +618,7 @@
         </main>
 
         <div id="ctx"></div>
+        <div id="themeMenu"></div>
         <div id="modals"></div>
         <div id="toast"></div>
         <input type="file" id="importFile" accept=".json" hidden>
@@ -780,6 +786,8 @@
             dbInfo: { path: '', size: 0, scanCount: 0 }, scansInfo: { path: '', size: 0 },
             response: emptyResponse(),
             theme: document.documentElement.getAttribute('data-theme') || 'dark',
+            themePref: document.documentElement.getAttribute('data-theme-pref') || 'system',
+            themeMenu: { show: false, x: 0, y: 0 },
             historyOpen: false, historyItems: [], historyTotal: 0, historyLimit: 50, historySearch: '',
             historyFilters: { existence: 'all', platform: 'all', scanCount: 'all', indexability: 'all' },
             availablePlatforms: [], scanCountOptions: [], selectedHistoryIndex: -1,
@@ -1035,7 +1043,7 @@
                 <a class="icon-btn" href="https://github.com/austinginder/periscope" target="_blank" rel="noopener" title="GitHub">${ic('github', 'fill')}</a>
                 ${when(!S.reportMode && (!S.localMode || S.bridgeConnected === true), `<button class="icon-btn" data-act="history" title="Scan log (⌘K)">${ic('history')}</button>`)}
                 <button class="icon-btn" data-act="help" title="Help (?)">${ic('help')}</button>
-                <button class="icon-btn theme-btn" data-act="theme" title="${S.theme === 'dark' ? 'Switch to light' : 'Switch to dark'}">${ic(S.theme === 'dark' ? 'sun' : 'moon')}</button>`;
+                <button class="icon-btn theme-btn" data-act="theme" data-theme-menu title="${S.themePref === 'system' ? 'Following system (' + S.theme + '). Click to switch, right-click for options' : (S.theme === 'dark' ? 'Switch to light' : 'Switch to dark') + '. Right-click for options'}">${ic(S.themePref === 'system' ? 'monitor' : S.theme === 'dark' ? 'moon' : 'sun')}</button>`;
         }
 
         function renderHero() {
@@ -1338,6 +1346,14 @@
                 if (rct.bottom > window.innerHeight - 8) el.style.top = Math.max(8, window.innerHeight - rct.height - 8) + 'px';
             }
         }
+        function renderThemeMenu() {
+            const m = S.themeMenu;
+            if (!m.show) { $('#themeMenu').innerHTML = ''; return; }
+            const item = (v, icon, label) => `<button data-act="setTheme" data-value="${v}" class="${S.themePref === v ? 'on' : ''}">${ic(icon)} ${label}${S.themePref === v ? ic('check', 'tick') : ''}</button>`;
+            $('#themeMenu').innerHTML = `<div class="ctx" style="top:${m.y}px;left:${m.x}px"><div class="ctx-l">Appearance</div>${item('system', 'monitor', 'System')}${item('light', 'sun', 'Light')}${item('dark', 'moon', 'Dark')}</div>`;
+            const el = $('#themeMenu .ctx');
+            if (el) { const r = el.getBoundingClientRect(); if (r.right > window.innerWidth - 8) el.style.left = Math.max(8, window.innerWidth - r.width - 8) + 'px'; }
+        }
         function renderToast() {
             $('#toast').innerHTML = S.toast.show ? `<div class="toast"><span>${esc(S.toast.message)}</span><button data-act="dismissToast">DISMISS</button></div>` : '';
         }
@@ -1500,13 +1516,17 @@
                 render();
                 $('#scanInput').focus();
             },
-            toggleTheme() {
-                S.theme = S.theme === 'light' ? 'dark' : 'light';
-                try { localStorage.setItem('theme', S.theme); } catch (e) { }
+            systemTheme() { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; },
+            setTheme(pref) {
+                // pref: 'system' | 'light' | 'dark'. data-theme = effective mode, data-theme-pref = preference.
+                S.themePref = pref;
+                S.theme = pref === 'system' ? A.systemTheme() : pref;
+                try { if (pref === 'system') localStorage.removeItem('theme'); else localStorage.setItem('theme', pref); } catch (e) { }
                 document.documentElement.setAttribute('data-theme', S.theme);
-                document.documentElement.setAttribute('data-theme-pref', S.theme);
-                renderTopbar();
+                document.documentElement.setAttribute('data-theme-pref', pref);
+                S.themeMenu.show = false; renderThemeMenu(); renderTopbar();
             },
+            toggleTheme() { A.setTheme(S.theme === 'light' ? 'dark' : 'light'); },
             copy(text, msg) {
                 navigator.clipboard.writeText(text).then(() => showToast(msg || 'Copied to clipboard'), () => showToast('Copy failed'));
             },
@@ -1831,10 +1851,12 @@
             scanTarget: () => { S.ctx.show = false; renderCtx(); S.domain = S.ctx.value; $('#scanInput').value = S.domain; A.scan(); },
             copyValue: () => { S.ctx.show = false; renderCtx(); A.copy(S.ctx.value); },
             dismissToast: () => { S.toast.show = false; renderToast(); },
+            setTheme: el => A.setTheme(el.dataset.value),
         };
 
         document.addEventListener('click', e => {
             const t = e.target.closest('[data-act]');
+            if (S.themeMenu.show && !e.target.closest('#themeMenu')) { S.themeMenu.show = false; renderThemeMenu(); }
             if (!t) { if (S.ctx.show) { S.ctx.show = false; renderCtx(); } return; }
             if (t.tagName === 'A' && t.dataset.act === 'reset') e.preventDefault();
             const fn = acts[t.dataset.act];
@@ -1846,6 +1868,8 @@
             const li = e.target.closest('#dropdown [data-act="pick"]'); if (li) { e.preventDefault(); acts.pick(li); }
         });
         document.addEventListener('contextmenu', e => {
+            const tb = e.target.closest('[data-theme-menu]');
+            if (tb) { e.preventDefault(); const r = tb.getBoundingClientRect(); S.themeMenu = { show: true, x: r.right - 200, y: r.bottom + 6 }; renderThemeMenu(); return; }
             const t = e.target.closest('[data-ctx]');
             if (!t) return;
             e.preventDefault();
@@ -1881,6 +1905,7 @@
             const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
             if (e.key === 'Escape') {
                 if (S.ctx.show) { S.ctx.show = false; renderCtx(); }
+                if (S.themeMenu.show) { S.themeMenu.show = false; renderThemeMenu(); }
                 if (S.acOpen) { S.acOpen = false; renderDropdown(); }
                 if (anyModalOpen()) closeModal();
                 return;
@@ -1899,6 +1924,8 @@
             if (S.versionsOpen) nav('domainVersions', 'selectedIndex', 'version-item-');
             else if (S.historyOpen) nav('historyItems', 'selectedHistoryIndex', 'history-item-');
         });
+
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (S.themePref === 'system') A.setTheme('system'); });
 
         // ---- boot ----
         (function boot() {
