@@ -3780,8 +3780,6 @@ if ($pdo) {
         }
         $images = array_filter($images);
 
-        $logoBase64 = file_exists(__DIR__ . '/Periscope.webp') ? 'data:image/webp;base64,' . base64_encode(file_get_contents(__DIR__ . '/Periscope.webp')) : '';
-
         $template = @file_get_contents(__DIR__ . '/index.html');
         if (!$template) {
             header('Content-Type: text/plain');
@@ -3796,9 +3794,11 @@ if ($pdo) {
             'images' => $images,
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES);
         $bootstrap = "<script>window.PERISCOPE_EMBED = $embed;</script>\n";
-        // Inline the logo so the file has no dependency on the bridge, and drop the live favicon link.
-        $template = str_replace('src="Periscope.webp"', 'src="' . $logoBase64 . '"', $template);
-        $template = str_replace('<link rel="icon" href="Periscope.webp" />', $images['favicon'] ?? '' ? '<link rel="icon" href="' . $images['favicon'] . '" />' : '', $template);
+        // The mark and favicon are inline SVG in index.html, so the file already has no asset dependency.
+        // Swap the favicon for the scanned site's own icon when one was stored.
+        if (!empty($images['favicon'])) {
+            $template = preg_replace('/<link id="favicon"[^>]*>/', '<link id="favicon" rel="icon" href="' . $images['favicon'] . '">', $template, 1);
+        }
         $template = str_replace('<title>Periscope</title>', '<title>Periscope report: ' . htmlspecialchars($domain) . '</title>', $template);
         $template = preg_replace('/<script>\s*\/\/ -{10,}\s*\/\/ Periscope frontend/', $bootstrap . '$0', $template, 1, $injected);
         if (!$injected) $template = str_replace('</head>', $bootstrap . '</head>', $template);
