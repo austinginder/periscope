@@ -9,6 +9,9 @@
 - **Well-Known Files** - The metadata card is generated from one list, shows a found/total count, and pluralizes its notes correctly.
 - **Exported Reports** - `action=export_report` no longer carries a second copy of the interface. The export is the same `index.html` booted in report mode with the scan data, raw text files (including WHOIS and RDAP) and stored images inlined as `window.PERISCOPE_EMBED`. Exports are fully offline and match the live UI exactly.
 - **Deep Links** - `?domain=` now asks the bridge for the newest stored scan of that exact host before falling back to a fresh scan, so domains outside the first page of history load from cache.
+- **Click to Copy** - Every value in a report copies on click: DNS values, IPs, registration fields, header values, analytics IDs (Fathom, GA), DKIM selectors, TLS issuer, host/CDN and the favicon hash. A drag-selection is left alone. Each card head gains a copy button that copies the card as plain text (DNS as tab-separated rows, headers as `name: value`), and a link icon next to the domain copies the shareable `periscope.run/?local=true&domain=…` URL.
+- **Previously Hidden Fields** - The TLS card shows the issued date; robots.txt expands to list its disallow rules and declared sitemaps; X-XSS-Protection is listed in the security card tagged as legacy; the page title and meta description appear under the domain heading.
+- **SameSite Grading** - Cookie flags now read `Strict`/`Lax` as good, `None` as a warning and a missing attribute as a miss, instead of treating any value as a pass.
 - **Appearance Menu** - Right-click the theme button for System / Light / Dark. Left-click still flips light and dark. The icon shows the stored preference (monitor, sun, moon) and "System" follows the OS live.
 - **Context Menu** - Right-click gains a "Scan" action for hostnames and stays on screen near the viewport edges.
 

@@ -107,6 +107,25 @@
         [hidden] { display: none !important; }
         .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
+        /* ---- click to copy: any [data-ctx] value copies on click, right-click for more ---- */
+        [data-ctx] { cursor: pointer; border-radius: 3px; transition: background .12s; }
+        [data-ctx]:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+        [data-ctx].copied { background: color-mix(in srgb, var(--ok) 22%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+        td[data-ctx]:hover, td[data-ctx].copied { box-shadow: none; }
+        .copy-card { opacity: 0; transition: opacity .15s; }
+        .card:hover .copy-card, .copy-card:focus-visible { opacity: 1; }
+        @media (hover: none) { .copy-card { opacity: 1; } }
+        .card-right { display: inline-flex; align-items: center; gap: 6px; }
+        .sub-list { margin: 2px 0 6px 0; padding: 6px 10px; background: var(--bg-sunk); border: 1px solid var(--line); border-radius: var(--r-sm); display: flex; flex-direction: column; gap: 3px; }
+        .sub-list code { font-size: 11.5px; overflow-wrap: anywhere; }
+        .sub-list .more { font-size: 11px; color: var(--faint); }
+        .row.stack-row { flex-direction: column; align-items: stretch; gap: 0; }
+        .row > .row-main { display: flex; flex: 1; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
+        .report-page { margin-top: 8px; font-size: 13.5px; max-width: 72ch; }
+        .report-page .pt { font-weight: 500; }
+        .report-page .pd { color: var(--dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .facts .v.mono[data-ctx] { display: inline-block; max-width: 100%; }
+
         /* ---- icons ---- */
         .ic { width: 1em; height: 1em; display: inline-block; vertical-align: -.15em; flex: none;
               stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -538,6 +557,7 @@
         <symbol id="i-corner-right" viewBox="0 0 24 24"><path d="M4 19v-7a4 4 0 0 1 4-4h11"/><path d="m15 4 4 4-4 4"/></symbol>
         <symbol id="i-subdir" viewBox="0 0 24 24"><path d="M5 4v7a3 3 0 0 0 3 3h11"/><path d="m15 10 4 4-4 4"/></symbol>
         <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M2.5 12h2M19.5 12h2M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+        <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2"/></symbol>
         <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
         <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
         <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9.5 7V4.5h5V7"/><path d="m6 7 1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></symbol>
@@ -776,6 +796,7 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
         };
 
+        const decodeEntities = s => { if (!s || !/[&]/.test(s)) return s || ''; try { return new DOMParser().parseFromString(String(s), 'text/html').documentElement.textContent || ''; } catch (e) { return String(s); } };
         const emptyResponse = () => ({ domain: '', errors: [], zone: '', timestamp: null, ip_lookup: {} });
 
         const S = {
@@ -800,6 +821,7 @@
             helpOpen: false, ogOpen: false, twOpen: false, favOpen: false, pluginsOpen: false,
             pendingDeepLink: null,
             reportMode: !!EMBED, embed: EMBED, imgFailed: { og: false, tw: false },
+            openRows: {},
         };
 
         const getUrl = params => (S.localMode ? BRIDGE + '/' : '') + '?' + params;
@@ -955,8 +977,10 @@
                 const raw = (k, rawType, title) => ((m[k] && m[k].raw_stored && !S.reportMode) || embedded(rawType)) ? { act: 'preview', type: rawType, title } : null;
                 const count = (n, word) => n ? plural(n, word.replace(/s$/, ''), word) : '';
                 return [
-                    { key: 'robots_txt', label: 'robots.txt', present: present('robots_txt'), note: count(m.robots_txt?.disallow_count, 'rules'), preview: raw('robots_txt', 'robots_txt', 'robots.txt') },
-                    { key: 'sitemap', label: 'sitemap.xml', present: present('sitemap'), note: count(m.sitemap?.url_count, 'URLs'), preview: raw('sitemap', 'sitemap_xml', 'sitemap.xml') },
+                    { key: 'robots_txt', label: 'robots.txt', present: present('robots_txt'), note: count(m.robots_txt?.disallow_count, 'rules'), preview: raw('robots_txt', 'robots_txt', 'robots.txt'),
+                      detail: [...(m.robots_txt?.disallows || []).map(d => ({ k: 'Disallow', v: d })), ...(m.robots_txt?.sitemaps || []).map(s => ({ k: 'Sitemap', v: s }))], detailTotal: (m.robots_txt?.disallow_count || 0) + (m.robots_txt?.sitemaps || []).length },
+                    { key: 'sitemap', label: 'sitemap.xml', present: present('sitemap'), note: count(m.sitemap?.url_count, 'URLs'), preview: raw('sitemap', 'sitemap_xml', 'sitemap.xml'),
+                      detail: (m.sitemap?.urls || []).map(u => ({ k: '', v: u })), detailTotal: m.sitemap?.url_count || 0 },
                     { key: 'security_txt', label: 'security.txt', present: present('security_txt'), note: '', preview: raw('security_txt', 'security_txt', 'security.txt') },
                     { key: 'ads_txt', label: 'ads.txt', present: present('ads_txt'), note: count(m.ads_txt?.seller_count, 'sellers'), preview: raw('ads_txt', 'ads_txt', 'ads.txt') },
                     { key: 'app_ads_txt', label: 'app-ads.txt', present: present('app_ads_txt'), note: count(m.app_ads_txt?.seller_count, 'sellers'), preview: raw('app_ads_txt', 'app_ads_txt', 'app-ads.txt') },
@@ -1003,6 +1027,40 @@
                     return escText(line).replace(re, (s, str, dir, cls, type) =>
                         str ? `<span class="z-s">${s}</span>` : dir ? `<span class="z-d">${s}</span>` : cls ? `<span class="z-cls">${s}</span>` : type ? `<span class="z-t">${s}</span>` : `<span class="z-num">${s}</span>`);
                 }).join('\n');
+            },
+            securityHeaders() {
+                return [
+                    { key: 'hsts', label: 'Strict-Transport-Security' },
+                    { key: 'csp', label: 'Content-Security-Policy' },
+                    { key: 'x_frame_options', label: 'X-Frame-Options' },
+                    { key: 'x_content_type_options', label: 'X-Content-Type-Options' },
+                    { key: 'referrer_policy', label: 'Referrer-Policy' },
+                    { key: 'permissions_policy', label: 'Permissions-Policy' },
+                    { key: 'x_xss_protection', label: 'X-XSS-Protection', legacy: true },
+                ];
+            },
+            sameSiteTone(c) { const v = String(c.samesite || '').toLowerCase(); return !v ? 'bad' : v === 'none' ? 'warn' : 'ok'; },
+            pageLink() { return `https://periscope.run/?local=true&domain=${encodeURIComponent(S.response.target_host || S.domain)}`; },
+            // Plain-text rendering of a card, for the copy button in its head.
+            cardText(key) {
+                const r = S.response, L = [];
+                const kv = (k, v) => L.push(`${k}: ${v}`);
+                switch (key) {
+                    case 'tls': if (r.ssl) { kv('Issued', r.ssl.issued || ''); kv('Expires', r.ssl.expires || ''); kv('Days remaining', r.ssl.days_remaining); kv('Issuer', r.ssl.issuer || ''); } break;
+                    case 'platform': kv('Platform', r.cms?.name || 'HTML'); if (r.cms?.version) kv('Version', r.cms.version); if (r.infrastructure?.language) kv('Language', r.infrastructure.language); if (r.cms?.multisite) L.push('WordPress Multisite'); if (r.cms?.multitenancy) L.push('Multi-tenant'); if (r.cms?.plugins?.length) { L.push('Plugins:'); r.cms.plugins.forEach(p => L.push('  ' + p)); } break;
+                    case 'infra': ['host', 'cdn', 'server'].forEach(k => { if (r.infrastructure?.[k]) kv(k.toUpperCase() === 'CDN' ? 'CDN' : k[0].toUpperCase() + k.slice(1), r.infrastructure[k]); }); break;
+                    case 'security': D.securityHeaders().forEach(h => kv(h.label, r.security?.[h.key]?.present ? 'present' : 'missing')); if (r.security?.score) kv('Score', `${r.security.score.value}/${r.security.score.total}`); break;
+                    case 'cookies': (r.cookie_security?.cookies || []).forEach(c => L.push(`${c.name}: Secure=${c.secure ? 'yes' : 'no'} HttpOnly=${c.httponly ? 'yes' : 'no'} SameSite=${c.samesite || 'missing'}${c.session ? ' (session)' : ''}`)); break;
+                    case 'tech': { const t = r.technology || {}; if (t.frameworks?.length) kv('Frameworks', t.frameworks.join(', ')); if (t.analytics?.length) kv('Analytics', t.analytics.map(a => a.name + (a.id ? ` (${a.id})` : '')).join(', ')); if (t.ecommerce?.length) kv('E-commerce', t.ecommerce.join(', ')); if (t.widgets?.length) kv('Widgets', t.widgets.join(', ')); break; }
+                    case 'wellknown': D.metaItems().forEach(m => kv(m.label, m.present ? 'found' + (m.note ? ` (${m.note})` : '') : 'not found')); break;
+                    case 'registration': (r.domain || []).forEach(d => kv(d.name, d.value)); break;
+                    case 'network': Object.entries(r.ip_lookup || {}).forEach(([ip, rows]) => { L.push(ip); String(rows).split('\n').forEach(l => { if (l.trim()) L.push('  ' + l.trim()); }); const p = r.ptr_records?.[ip]; if (p) L.push(`  PTR: ${p.ptr}${p.forward_match ? ' (verified)' : ' (mismatch)'}`); }); break;
+                    case 'headers': Object.entries(r.http_headers || {}).forEach(([k, v]) => kv(k, Array.isArray(v) ? v.join('\n' + ' '.repeat(k.length + 2)) : v)); break;
+                    case 'spf': { const s = D.spf(); if (s) { L.push(s.raw); L.push(''); s.mechanisms.forEach(m => L.push(`${m.raw.padEnd(40)} ${m.description}`)); L.push(''); kv('DNS lookups', `${s.dnsLookups}/10`); s.errors.forEach(e => L.push('Error: ' + e)); s.warnings.forEach(w => L.push('Warning: ' + w)); } break; }
+                    case 'email': { const e = D.emailHealth(); if (e) { kv('Grade', `${e.grade} (${e.totalScore}/${e.maxScore})`); kv('MX', `${e.mxCount} server(s)`); kv('SPF', e.spf.present ? e.spf.details.join(', ') : 'missing'); kv('DKIM', e.dkim.present ? e.dkim.selectors.join(', ') : 'missing'); kv('DMARC', e.dmarc.present ? e.dmarc.details.join(', ') : 'missing'); e.recommendations.forEach(x => L.push('- ' + x)); } break; }
+                    case 'dns': D.sortedDns().forEach(x => L.push(`${x.type}\t${x.name}\t${x.value}`)); break;
+                }
+                return L.join('\n');
             },
             currentHistoryId() {
                 if (!S.response.timestamp || !S.domainVersions.length) return null;
@@ -1121,7 +1179,7 @@
         }
 
         // ---- results ----
-        const card = (title, icon, body, right, extra) => `<div class="card"${extra || ''}><div class="card-head"><span class="card-title">${ic(icon)} ${title}</span>${right || ''}</div>${body}</div>`;
+        const card = (title, icon, body, right, copyKey) => `<div class="card"><div class="card-head"><span class="card-title">${ic(icon)} ${title}</span><span class="card-right">${right || ''}${copyKey ? `<button class="icon-btn sm copy-card" data-act="copyCard" data-card="${copyKey}" title="Copy as text">${ic('copy')}</button>` : ''}</span></div>${body}</div>`;
         const fact = (label, value, cls, title) => `<div class="fact"><div class="l">${label}</div><div class="v ${cls || ''}"${title ? ` title="${esc(title)}"` : ''}>${value}</div></div>`;
 
         function renderResults() {
@@ -1138,7 +1196,9 @@
                         <div class="report-title">
                             <h1${ctxAttr(r.target_host || S.domain)}>${esc(r.target_host || S.domain)}</h1>
                             ${when(r.is_subdomain, () => `<span class="of">subdomain of <code${ctxAttr(r.root_domain)}>${esc(r.root_domain)}</code></span>`)}
+                            ${when(!S.reportMode, () => `<button class="icon-btn sm" data-act="copyLink" title="Copy link to this report">${ic('link')}</button>`)}
                         </div>
+                        ${when(r.metadata?.meta_tags?.basic?.title || r.metadata?.meta_tags?.basic?.description, () => { const b = r.metadata.meta_tags.basic; return `<div class="report-page">${when(b.title, () => `<div class="pt"${ctxAttr(decodeEntities(b.title))}>${esc(decodeEntities(b.title))}</div>`)}${when(b.description, () => `<div class="pd" title="${esc(decodeEntities(b.description))}">${esc(decodeEntities(b.description))}</div>`)}</div>`; })}
                         <div class="report-meta">
                             <span class="chip chip-plain">${ic('clock')} ${esc(fmtDate(r.timestamp))}</span>
                             ${when(r.request, () => {
@@ -1201,8 +1261,9 @@
                 out += card('TLS certificate', 'lock', `<div class="card-body"><div class="facts">
                     ${fact('Days left', esc(d), 'big ' + tone)}
                     ${fact('Expires', esc(r.ssl.expires), 'mono' + (d < 30 ? ' warn' : ''))}
-                    ${when(r.ssl.issuer, () => `<div class="fact" style="grid-column:1/-1"><div class="l">Issuer</div><div class="v mono" title="${esc(r.ssl.issuer)}">${esc(r.ssl.issuer)}</div></div>`)}
-                    </div></div>`, `<span class="tag tag-${tone}">${d < 14 ? 'Expiring' : d < 30 ? 'Renew soon' : 'Valid'}</span>`);
+                    ${when(r.ssl.issued, () => fact('Issued', esc(r.ssl.issued), 'mono'))}
+                    ${when(r.ssl.issuer, () => `<div class="fact" style="grid-column:1/-1"><div class="l">Issuer</div><div class="v mono" title="${esc(r.ssl.issuer)}"${ctxAttr(r.ssl.issuer)}>${esc(r.ssl.issuer)}</div></div>`)}
+                    </div></div>`, `<span class="tag tag-${tone}">${d < 14 ? 'Expiring' : d < 30 ? 'Renew soon' : 'Valid'}</span>`, 'tls');
             }
             const cms = r.cms && !Array.isArray(r.cms) ? r.cms : null;
             if (cms || (r.raw_available && r.domain_exists !== false)) {
@@ -1212,47 +1273,52 @@
                 out += card('Platform', 'layers', `<div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
                     <span style="display:inline-flex;align-items:center;gap:8px;font-size:18px;font-weight:600;letter-spacing:-.01em">${esc(cms ? cms.name : 'HTML')}
                         ${when(cms && cms.name === 'WordPress' && cms.plugins && cms.plugins.length, () => `<button class="btn btn-ghost btn-xs" data-act="plugins" title="${cms.plugins.length} plugins detected">${ic('puzzle')} ${cms.plugins.length}</button>`)}</span>
-                    <span class="chips">${when(cms && cms.version, () => `<span class="chip">v${esc(cms.version)}</span>`)}${when(r.infrastructure && r.infrastructure.language, () => `<span class="chip chip-accent">${esc(r.infrastructure.language)}</span>`)}</span>
-                    </div>`, badges);
+                    <span class="chips">${when(cms && cms.version, () => `<span class="chip"${ctxAttr(cms.version)}>v${esc(cms.version)}</span>`)}${when(r.infrastructure && r.infrastructure.language, () => `<span class="chip chip-accent">${esc(r.infrastructure.language)}</span>`)}</span>
+                    </div>`, badges, 'platform');
             }
             const inf = r.infrastructure && !Array.isArray(r.infrastructure) ? r.infrastructure : null;
             if (inf && (inf.host || inf.cdn || inf.server)) {
                 out += card('Infrastructure', 'server', `<div class="card-body"><div class="facts">
-                    ${when(inf.host, () => fact('Host', esc(inf.host)))}${when(inf.cdn, () => fact('CDN', esc(inf.cdn)))}${when(inf.server, () => fact('Server', esc(inf.server), 'mono', inf.server))}
-                    </div></div>`);
+                    ${when(inf.host, () => `<div class="fact"><div class="l">Host</div><div class="v"${ctxAttr(inf.host)}>${esc(inf.host)}</div></div>`)}${when(inf.cdn, () => `<div class="fact"><div class="l">CDN</div><div class="v"${ctxAttr(inf.cdn)}>${esc(inf.cdn)}</div></div>`)}${when(inf.server, () => `<div class="fact"><div class="l">Server</div><div class="v mono" title="${esc(inf.server)}"${ctxAttr(inf.server)}>${esc(inf.server)}</div></div>`)}
+                    </div></div>`, '', 'infra');
             }
             if (r.security && r.security.score) {
-                const hdrs = [['hsts', 'Strict-Transport-Security'], ['csp', 'Content-Security-Policy'], ['x_frame_options', 'X-Frame-Options'], ['x_content_type_options', 'X-Content-Type-Options'], ['referrer_policy', 'Referrer-Policy'], ['permissions_policy', 'Permissions-Policy']];
-                out += card('Security headers', 'shield-check', `<div class="card-body tight rows">${hdrs.map(([k, label]) => {
-                    const on = r.security[k] && r.security[k].present;
-                    return `<div class="row"><span class="k mono">${label}</span>${ic(on ? 'check-circle' : 'x-circle', on ? 'mark-ok' : 'mark-off')}</div>`;
-                }).join('')}</div>`, `<span class="tag mono score-tag ${scoreTag(r.security.score.value, 2, 4)}">${r.security.score.value}/${r.security.score.total}</span>`);
+                out += card('Security headers', 'shield-check', `<div class="card-body tight rows">${D.securityHeaders().map(h => {
+                    const on = r.security[h.key] && r.security[h.key].present;
+                    return `<div class="row"><span class="k"><span class="mono">${h.label}</span>${h.legacy ? '<span class="tag" title="Deprecated header; modern browsers ignore it">legacy</span>' : ''}</span>${ic(on ? 'check-circle' : 'x-circle', on ? (h.legacy ? 'dim' : 'mark-ok') : 'mark-off')}</div>`;
+                }).join('')}</div>`, `<span class="tag mono score-tag ${scoreTag(r.security.score.value, 2, 4)}">${r.security.score.value}/${r.security.score.total}</span>`, 'security');
             }
             const ck = r.cookie_security;
             if (ck && ck.cookies && ck.cookies.length) {
-                const flag = (on, label) => `<span class="${on ? 'ok' : 'bad'}" style="display:inline-flex;align-items:center;gap:3px">${ic(on ? 'check-circle' : 'x-circle')} ${label}</span>`;
-                out += card('Cookies', 'cookie', `<div class="card-body tight rows">${ck.cookies.map(c => `<div class="row" style="align-items:flex-start;flex-wrap:wrap">
+                const flag = (tone, label, title) => `<span class="${tone}" style="display:inline-flex;align-items:center;gap:3px"${title ? ` title="${esc(title)}"` : ''}>${ic(tone === 'ok' ? 'check-circle' : tone === 'warn' ? 'alert' : 'x-circle')} ${label}</span>`;
+                const ssTitle = t => t === 'ok' ? 'Cookie is not sent on cross-site requests' : t === 'warn' ? 'SameSite=None: sent on every cross-site request. Weakest setting; requires Secure' : 'No SameSite attribute: browsers default to Lax, but the intent is not declared';
+                out += card('Cookies', 'cookie', `<div class="card-body tight rows">${ck.cookies.map(c => { const ss = D.sameSiteTone(c); return `<div class="row" style="align-items:flex-start;flex-wrap:wrap">
                     <span class="k"><code class="truncate" style="max-width:220px" title="${esc(c.name)}"${ctxAttr(c.name)}>${esc(c.name)}</code>${when(c.session, '<span class="tag tag-warn">session</span>')}</span>
-                    <span class="v" style="font-family:var(--font-sans);gap:10px">${flag(c.secure, 'Secure')}${flag(c.httponly, 'HttpOnly')}${flag(c.samesite, 'SameSite' + (c.samesite ? '=' + esc(c.samesite) : ''))}</span></div>`).join('')}</div>`,
-                    ck.score ? `<span class="tag mono score-tag ${ck.score.value === 0 ? 'tag-bad' : ck.score.value <= 2 ? 'tag-warn' : 'tag-ok'}">${ck.score.value}/${ck.score.total}</span>` : '');
+                    <span class="v" style="font-family:var(--font-sans);gap:10px">${flag(c.secure ? 'ok' : 'bad', 'Secure')}${flag(c.httponly ? 'ok' : 'bad', 'HttpOnly')}${flag(ss, 'SameSite' + (c.samesite ? '=' + esc(c.samesite) : ''), ssTitle(ss))}</span></div>`; }).join('')}</div>`,
+                    ck.score ? `<span class="tag mono score-tag ${ck.score.value === 0 ? 'tag-bad' : ck.score.value <= 2 ? 'tag-warn' : 'tag-ok'}">${ck.score.value}/${ck.score.total}</span>` : '', 'cookies');
             }
             const t = r.technology && !Array.isArray(r.technology) ? r.technology : null;
             if (t && (t.frameworks?.length || t.analytics?.length || t.ecommerce?.length || t.widgets?.length)) {
-                const group = (label, items, cls, fmt) => items && items.length ? `<div><div class="section-l">${label}</div><div class="chips">${items.map(x => `<span class="tag ${cls}">${fmt ? fmt(x) : esc(x)}</span>`).join('')}</div></div>` : '';
+                const group = (label, items, cls, fmt, ctxOf) => items && items.length ? `<div><div class="section-l">${label}</div><div class="chips">${items.map(x => `<span class="tag ${cls}"${ctxOf ? ctxAttr(ctxOf(x)) : ''}${ctxOf && ctxOf(x) ? ' title="Click to copy the ID"' : ''}>${fmt ? fmt(x) : esc(x)}</span>`).join('')}</div></div>` : '';
                 out += card('Technology', 'code', `<div class="card-body stack-sm">
                     ${group('Frameworks', t.frameworks, 'tag-accent')}
-                    ${group('Analytics', t.analytics, 'tag-purple', a => esc(a.name) + (a.id ? `<span style="opacity:.6;font-weight:400">${esc(a.id)}</span>` : ''))}
+                    ${group('Analytics', t.analytics, 'tag-purple', a => esc(a.name) + (a.id ? `<code style="opacity:.75;font-weight:400;margin-left:4px">${esc(a.id)}</code>` : ''), a => a.id || '')}
                     ${group('E-commerce', t.ecommerce, 'tag-ok')}
-                    ${group('Widgets', t.widgets, 'tag-warn')}</div>`);
+                    ${group('Widgets', t.widgets, 'tag-warn')}</div>`, '', 'tech');
             }
             if (r.metadata && !Array.isArray(r.metadata) && Object.keys(r.metadata).length) {
                 const items = D.metaItems(), found = items.filter(m => m.present), missing = items.filter(m => !m.present);
                 const previewBtn = m => m.preview ? `<button class="peek" data-act="${m.preview.act}"${m.preview.type ? ` data-type="${esc(m.preview.type)}" data-title="${esc(m.preview.title)}"` : ''} title="Preview">${ic(m.icon || 'eye')}</button>` : '';
                 out += card('Well-known files', 'file', `<div class="card-body tight rows">
-                    ${found.map(m => `<div class="row"><span class="k"><span class="mono">${m.label}</span>${previewBtn(m)}</span><span class="v">${when(m.note, () => `<span class="n">${esc(m.note)}</span>`)}${ic('check-circle', 'mark-ok')}</span></div>`).join('')}
+                    ${found.map(m => {
+                        const hasDetail = m.detail && m.detail.length, open = hasDetail && S.openRows[m.key];
+                        const toggle = hasDetail ? `<button class="peek" data-act="toggleRow" data-row="${m.key}" title="${open ? 'Hide' : 'Show'} details">${ic(open ? 'chevron-up' : 'chevron-down')}</button>` : '';
+                        const detail = open ? `<div class="sub-list">${m.detail.slice(0, 20).map(d => `<code${ctxAttr(d.v)}>${d.k ? `<span class="dim">${esc(d.k)}</span> ` : ''}${esc(d.v)}</code>`).join('')}${m.detailTotal > Math.min(20, m.detail.length) ? `<span class="more">and ${m.detailTotal - Math.min(20, m.detail.length)} more in the raw file</span>` : ''}</div>` : '';
+                        return `<div class="row${hasDetail ? ' stack-row' : ''}"><div class="row-main"><span class="k"><span class="mono">${m.label}</span>${previewBtn(m)}${toggle}</span><span class="v">${when(m.note, () => `<span class="n">${esc(m.note)}</span>`)}${ic('check-circle', 'mark-ok')}</span></div>${detail}</div>`;
+                    }).join('')}
                     ${when(missing.length, () => `<button class="link link-dim small" style="padding:10px 0 4px;border-top:1px solid var(--line);margin-top:4px" data-act="toggleMissing">${ic(S.showMissingMeta ? 'chevron-up' : 'chevron-down')} ${S.showMissingMeta ? 'Hide' : 'Show'} ${missing.length} not found</button>`)}
                     ${when(S.showMissingMeta, () => missing.map(m => `<div class="row"><span class="k mono">${m.label}</span>${ic('x-circle', 'mark-off')}</div>`).join(''))}
-                    </div>`, `<span class="tag mono">${found.length}/${items.length}</span>`);
+                    </div>`, `<span class="tag mono">${found.length}/${items.length}</span>`, 'wellknown');
             }
             return out;
         }
@@ -1262,7 +1328,7 @@
             const rows = (r.domain || []).map(rec => `<div class="kv"><span class="k">${esc(rec.name)}</span><span class="v"${ctxAttr(rec.value)}>${esc(rec.value)}</span></div>`).join('');
             return card(`Registration${r.is_subdomain ? `<span class="card-sub">${esc(r.root_domain)}</span>` : ''}`, 'idcard',
                 `<div class="card-body flush">${rows || '<div class="hlist-empty small">No registration data.</div>'}</div>`,
-                hasRaw ? `<button class="link link-dim small" data-act="rawWhois">Raw ${ic('chevron-right')}</button>` : '');
+                hasRaw ? `<button class="link link-dim small" data-act="rawWhois">Raw ${ic('chevron-right')}</button>` : '', 'registration');
         }
 
         function renderNetwork(r) {
@@ -1276,14 +1342,14 @@
                         ${ptr.forward_match ? `<span class="tag tag-ok" title="Forward lookup resolves back to this IP">${ic('check-circle')} verified</span>` : `<span class="tag tag-warn" title="Forward lookup does not resolve back to this IP">${ic('alert')} mismatch</span>`}</span></div></div>`)}
                 </div>`;
             }).join('');
-            return card('Network coordinates', 'network', `<div class="card-body">${blocks || '<div class="hlist-empty small" style="padding:8px">No A records resolved.</div>'}</div>`);
+            return card('Network coordinates', 'network', `<div class="card-body">${blocks || '<div class="hlist-empty small" style="padding:8px">No A records resolved.</div>'}</div>`, '', 'network');
         }
 
         function renderHeaders(r) {
             const h = r.http_headers;
             if (!h || !Object.keys(h).length) return '';
             const rows = Object.entries(h).map(([k, v]) => { const val = Array.isArray(v) ? v.join('\n') : String(v); return `<tr><td class="k mono">${esc(k)}</td><td class="mono" style="white-space:pre-wrap"${ctxAttr(val)}>${esc(val)}</td></tr>`; }).join('');
-            return card('Response headers', 'server', `<div class="card-body flush table-wrap"><table class="table"><tbody>${rows}</tbody></table></div>`, `<span class="tag mono">${Object.keys(h).length}</span>`);
+            return card('Response headers', 'server', `<div class="card-body flush table-wrap"><table class="table"><tbody>${rows}</tbody></table></div>`, `<span class="tag mono">${Object.keys(h).length}</span>`, 'headers');
         }
 
         function renderSpf() {
@@ -1296,7 +1362,7 @@
             const items = spf.mechanisms.map(m => `<div class="list-item"><span class="lead">${iconFor(m)}</span>
                 <span class="main"><span class="t"><code${ctxAttr(m.value || m.raw)}>${esc(m.raw)}</code>${when(m.provider, () => `<span class="tag tag-accent">${esc(m.provider)}</span>`)}${when(m.isDnsLookup, ic('server', 'faint'))}</span><span class="d">${esc(m.description)}</span></span>
                 ${when(m.qualifier && m.type !== 'version', () => `<span class="end"><span class="tag mono ${m.qualifier === '+' ? 'tag-ok' : m.qualifier === '-' ? 'tag-bad' : m.qualifier === '~' ? 'tag-warn' : ''}">${esc(m.qualifierDesc)}</span></span>`)}</div>`).join('');
-            return card('SPF', 'mail', `${notes(spf.errors, 'bad', 'x-circle')}${notes(spf.warnings, 'warn', 'alert')}<div class="list">${items}</div>`, `<span class="chips" style="align-items:center">${status}${lookups}</span>`);
+            return card('SPF', 'mail', `${notes(spf.errors, 'bad', 'x-circle')}${notes(spf.warnings, 'warn', 'alert')}<div class="list">${items}</div>`, `<span class="chips" style="align-items:center">${status}${lookups}</span>`, 'spf');
         }
 
         function renderEmailHealth() {
@@ -1308,17 +1374,19 @@
             const body = `<div class="list">
                 ${item(ic('mail', 'purple'), 'MX records', `${plural(e.mxCount, 'mail server')} configured`, false, '<span class="tag mono tag-ok">+10</span>')}
                 ${item(ic(e.spf.present ? 'check-circle' : 'x-circle', e.spf.present ? 'ok' : 'bad'), 'SPF', e.spf.present ? e.spf.details.join(' · ') : 'No SPF record found', !e.spf.present, score(e.spf.score, 25))}
-                ${item(ic(e.dkim.present ? 'key' : 'key-off', e.dkim.present ? 'accent' : 'bad'), 'DKIM', e.dkim.present ? 'Selectors: ' + e.dkim.selectors.join(', ') : 'No DKIM records found', !e.dkim.present, score(e.dkim.score, 30))}
+                ${e.dkim.present
+                    ? `<div class="list-item"><span class="lead">${ic('key', 'accent')}</span><span class="main"><span class="t">DKIM</span><span class="d">Selectors: ${e.dkim.selectors.map(s => `<code${ctxAttr(s)}>${esc(s)}</code>`).join(', ')}</span></span><span class="end">${score(e.dkim.score, 30)}</span></div>`
+                    : item(ic('key-off', 'bad'), 'DKIM', 'No DKIM records found', true, score(e.dkim.score, 30))}
                 ${item(ic(e.dmarc.present ? 'shield-check' : 'shield-off', e.dmarc.present ? 'ok' : 'bad'), 'DMARC', e.dmarc.present ? e.dmarc.details.join(' · ') : 'No DMARC record found', !e.dmarc.present, score(e.dmarc.score, 35))}
                 </div>
                 ${when(e.recommendations.length, () => `<div class="card-foot warn"><div class="eyebrow" style="color:inherit;display:flex;align-items:center;gap:6px;margin-bottom:6px">${ic('bulb')} Recommendations</div>${e.recommendations.map(x => `<div style="display:flex;gap:6px;align-items:flex-start;padding:2px 0">${ic('chevron-right')}<span>${esc(x)}</span></div>`).join('')}</div>`)}`;
-            return card('Email health', 'shield-check', body, `<span style="display:inline-flex;align-items:baseline;gap:10px"><span class="grade ${gradeCls}">${e.grade}</span><span class="mono small dim num">${e.totalScore}/${e.maxScore}</span></span>`);
+            return card('Email health', 'shield-check', body, `<span style="display:inline-flex;align-items:baseline;gap:10px"><span class="grade ${gradeCls}">${e.grade}</span><span class="mono small dim num">${e.totalScore}/${e.maxScore}</span></span>`, 'email');
         }
 
         function renderDns() {
             const recs = D.sortedDns();
             const rows = recs.map(x => `<tr><td class="type">${esc(x.type)}</td><td class="name"${ctxAttr(x.name)}>${esc(x.name)}</td><td class="mono"${ctxAttr(x.value)}>${esc(x.value)}</td></tr>`).join('');
-            return card('DNS records', 'globe', `<div class="card-body flush table-wrap"><table class="table"><thead><tr><th style="width:70px">Type</th><th style="width:150px">Name</th><th>Value</th></tr></thead><tbody>${rows || '<tr><td colspan="3" class="dim">No records.</td></tr>'}</tbody></table></div>`, `<span class="tag mono">${recs.length}</span>`);
+            return card('DNS records', 'globe', `<div class="card-body flush table-wrap"><table class="table"><thead><tr><th style="width:70px">Type</th><th style="width:150px">Name</th><th>Value</th></tr></thead><tbody>${rows || '<tr><td colspan="3" class="dim">No records.</td></tr>'}</tbody></table></div>`, `<span class="tag mono">${recs.length}</span>`, 'dns');
         }
 
         function renderZone(r) {
@@ -1447,7 +1515,7 @@
                 const src = D.ogImage();
                 html += modal('og', '', 'Open Graph', `<div class="modal-body">
                     <div class="preview-card"><div class="preview-img">${src && !S.imgFailed.og ? `<img src="${esc(src)}" alt="" data-img="og">` : ic('image-off', 'ic-xl')}</div>
-                        <div class="preview-txt"><div class="u">${esc(S.domain)}</div><h4>${esc(og.title || mt.basic?.title || 'No title')}</h4>${when(og.description, () => `<p>${esc(og.description)}</p>`)}</div></div>
+                        <div class="preview-txt"><div class="u">${esc(S.domain)}</div><h4>${esc(decodeEntities(og.title || mt.basic?.title || 'No title'))}</h4>${when(og.description, () => `<p>${esc(decodeEntities(og.description))}</p>`)}</div></div>
                     <div class="rows" style="margin-top:14px">
                         ${when(og.type, () => kvRow('<span class="mono">og:type</span>', esc(og.type)))}
                         ${when(og.image, () => kvRow('<span class="mono">og:image</span>', `<span class="truncate" style="max-width:100%;display:block" title="${esc(og.image)}">${esc(og.image)}</span>`, ' style="max-width:60%"'))}
@@ -1458,7 +1526,7 @@
                 const src = D.twitterImage();
                 html += modal('tw', '', 'Twitter card', `<div class="modal-body">
                     <div class="preview-card round"><div class="preview-img">${src && !S.imgFailed.tw ? `<img src="${esc(src)}" alt="" data-img="tw">` : ic('image-off', 'ic-xl')}</div>
-                        <div class="preview-txt"><div class="u" style="text-transform:none;letter-spacing:0">${esc(S.domain)}</div><h4 style="font-weight:500">${esc(tw.title || og?.title || mt.basic?.title || 'No title')}</h4></div></div>
+                        <div class="preview-txt"><div class="u" style="text-transform:none;letter-spacing:0">${esc(S.domain)}</div><h4 style="font-weight:500">${esc(decodeEntities(tw.title || og?.title || mt.basic?.title || 'No title'))}</h4></div></div>
                     <div class="rows" style="margin-top:14px">
                         ${when(tw.card, () => kvRow('<span class="mono">twitter:card</span>', esc(tw.card)))}
                         ${when(tw.site, () => kvRow('<span class="mono">twitter:site</span>', esc(tw.site)))}
@@ -1528,7 +1596,12 @@
             },
             toggleTheme() { A.setTheme(S.theme === 'light' ? 'dark' : 'light'); },
             copy(text, msg) {
-                navigator.clipboard.writeText(text).then(() => showToast(msg || 'Copied to clipboard'), () => showToast('Copy failed'));
+                return navigator.clipboard.writeText(text).then(() => showToast(msg || 'Copied to clipboard'), () => showToast('Copy failed'));
+            },
+            copyValue(el) {
+                const v = String(el.dataset.ctx).trim();
+                const short = v.length > 48 ? v.slice(0, 45) + '…' : v;
+                A.copy(v, `Copied ${short}`).then(() => { el.classList.add('copied'); setTimeout(() => el.classList.remove('copied'), 700); });
             },
             downloadZone() {
                 const blob = new Blob([S.response.zone], { type: 'text/dns' });
@@ -1851,13 +1924,22 @@
             scanTarget: () => { S.ctx.show = false; renderCtx(); S.domain = S.ctx.value; $('#scanInput').value = S.domain; A.scan(); },
             copyValue: () => { S.ctx.show = false; renderCtx(); A.copy(S.ctx.value); },
             dismissToast: () => { S.toast.show = false; renderToast(); },
+            copyCard: el => { const key = el.dataset.card, text = D.cardText(key); if (text) A.copy(text, 'Card copied as text'); else showToast('Nothing to copy'); },
+            copyLink: () => A.copy(D.pageLink(), 'Report link copied'),
+            toggleRow: el => { S.openRows[el.dataset.row] = !S.openRows[el.dataset.row]; renderResults(); },
             setTheme: el => A.setTheme(el.dataset.value),
         };
 
         document.addEventListener('click', e => {
             const t = e.target.closest('[data-act]');
             if (S.themeMenu.show && !e.target.closest('#themeMenu')) { S.themeMenu.show = false; renderThemeMenu(); }
-            if (!t) { if (S.ctx.show) { S.ctx.show = false; renderCtx(); } return; }
+            if (!t) {
+                if (S.ctx.show) { S.ctx.show = false; renderCtx(); }
+                // Click-to-copy on any value. A drag-selection click is left alone so text selection still works.
+                const c = e.target.closest('[data-ctx]');
+                if (c && !e.target.closest('a') && !(window.getSelection && String(window.getSelection()).length)) A.copyValue(c);
+                return;
+            }
             if (t.tagName === 'A' && t.dataset.act === 'reset') e.preventDefault();
             const fn = acts[t.dataset.act];
             if (fn) { e.preventDefault(); fn(t, e); }
