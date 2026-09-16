@@ -32,6 +32,8 @@ curl -sL https://periscope.run/boot.sh | bash
 * **Infrastructure Detection:** Detects 35+ hosting providers and 15+ CDNs via HTTP header fingerprinting.
 * **Metadata Analysis:** Checks robots.txt, sitemap.xml, security.txt, Open Graph tags, and favicon hashes.
 * **History & Snapshots:** Uses a hybrid storage engine (SQLite + flat files) to save every lookup. Compare current DNS states against previous versions.
+* **Click to Copy:** Every value in a report copies on click (DNS values, IPs, analytics IDs, DKIM selectors, header values). Each card copies as plain text, and a link icon copies the shareable report URL.
+* **Light and Dark:** Follows the system appearance by default; click the theme button to flip, right-click for System / Light / Dark.
 * **Deep Linking:** Link directly to domain scans via URL parameters.
 * **CLI Mode:** Run quick diagnostics directly from your terminal.
 
@@ -46,7 +48,7 @@ curl -sL https://periscope.run/boot.sh | bash
 | `↑` / `↓` | Navigate lists |
 | `Enter` | Select item |
 
-*Right-click on IP addresses or Domain values in the UI to access context menus for "Dig" and "Whois".*
+*Click any value to copy it. Right-click IP addresses or hostnames for "Dig", "Whois" and "Scan".*
 
 ## 📡 DNS Records Scanned
 
@@ -468,7 +470,7 @@ This reprocesses scans that have raw files available, applying any new detection
 
 ## 📸 Screenshots
 
-Website Overview
+Overview cards
 
 ![](screenshot-2.webp)
 

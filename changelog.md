@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.6.0] - 2026-09-16
+
+A from-scratch interface with no framework, a new mark, click-to-copy everywhere, and exported reports that are the real UI rendered offline. Cached scans from 1.5 are regenerated on first view.
 
 ### Changed
 
