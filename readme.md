@@ -409,6 +409,8 @@ For local development, use the `--local` flag. This serves the `index.html` from
 
 This opens `http://127.0.0.1:8989/?local=true` with your local changes.
 
+The frontend is a single hand-written file with no build step and no framework: plain CSS custom properties for the design system (light and dark via `data-theme` on `<html>`), an inline SVG icon sprite, and a small vanilla JavaScript app (state object, template-literal renderers, delegated `data-act` events). Exported HTML reports reuse the same file in report mode, so a change to the UI is a change to the reports too.
+
 ### Deep Linking
 
 You can link directly to a domain scan using URL parameters:

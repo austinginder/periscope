@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **New Interface** - The web UI was redesigned and rebuilt from scratch as a dependency-free single file. Tailwind, Material Design Icons, Prism and Vue are gone; the page now ships its own design system (CSS custom properties, light and dark themes following the `data-theme` contract shared with Cove and Minn Admin), an inline SVG icon set, a home-grown BIND zone highlighter and a small vanilla JavaScript app. The only remaining external resource is the Geist / JetBrains Mono webfont, with a system fallback stack.
+- **Report Header** - Request status, protocol, server address and timing now sit as chips under the domain title instead of a separate connection bar. Scan actions (snapshots, export, refresh) moved into the header.
+- **Well-Known Files** - The metadata card is generated from one list, shows a found/total count, and pluralizes its notes correctly.
+- **Exported Reports** - `action=export_report` no longer carries a second copy of the interface. The export is the same `index.html` booted in report mode with the scan data, raw text files (including WHOIS and RDAP) and stored images inlined as `window.PERISCOPE_EMBED`. Exports are fully offline and match the live UI exactly.
+- **Deep Links** - `?domain=` now asks the bridge for the newest stored scan of that exact host before falling back to a fresh scan, so domains outside the first page of history load from cache.
+- **Context Menu** - Right-click gains a "Scan" action for hostnames and stays on screen near the viewport edges.
+
 ## [1.5.0] - 2026-05-29
 
 ### Added
