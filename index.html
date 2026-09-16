@@ -1137,11 +1137,21 @@
         function renderProgress() {
             const p = S.progress;
             if (S.loading && !S.loadingFromHistory) {
-                $('#progress').innerHTML = `<div class="progress rise">
-                    <div class="progress-row"><span>${esc(p.message)}</span>
-                        <span class="right"><span>${p.step}/${p.total}</span><button class="icon-btn sm danger" data-act="stop" title="Stop scan">${ic('stop')}</button></span></div>
-                    ${when(p.detail, () => `<div class="progress-detail">${esc(p.detail)}</div>`)}
-                    <div class="progress-bar"><i style="width:${Math.max(0, Math.min(100, p.percent || 0))}%"></i></div></div>`;
+                // Build the block once; later events only patch text and width so the entrance
+                // animation does not replay on every progress message.
+                let el = $('#progress .progress');
+                if (!el) {
+                    $('#progress').innerHTML = `<div class="progress rise">
+                        <div class="progress-row"><span class="p-msg"></span>
+                            <span class="right"><span class="p-step num"></span><button class="icon-btn sm danger" data-act="stop" title="Stop scan">${ic('stop')}</button></span></div>
+                        <div class="progress-detail p-detail"></div>
+                        <div class="progress-bar"><i style="width:0%"></i></div></div>`;
+                    el = $('#progress .progress');
+                }
+                $('.p-msg', el).textContent = p.message || '';
+                $('.p-step', el).textContent = `${p.step}/${p.total}`;
+                const d = $('.p-detail', el); d.textContent = p.detail || ''; d.hidden = !p.detail;
+                $('.progress-bar i', el).style.width = `${Math.max(0, Math.min(100, p.percent || 0))}%`;
             } else if (S.loading && S.loadingFromHistory) {
                 $('#progress').innerHTML = `<div class="progress rise dim small" style="display:flex;align-items:center;justify-content:center;gap:8px">${ic('refresh', 'spin')} Refreshing scan data…</div>`;
             } else $('#progress').innerHTML = '';
