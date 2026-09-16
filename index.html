@@ -1562,9 +1562,18 @@
                     <ul class="plugin-list">${cms.plugins.map(p => { const n = getPluginName(p); return `<li>${ic('box')}<span style="min-width:0"><div class="n" title="${esc(n || p)}">${esc(n || p)}</div>${n ? `<div class="s">${esc(p)}</div>` : ''}</span></li>`; }).join('')}</ul></div>`);
             }
 
-            const focusSearch = S.historyOpen && !$('#historySearch');
+            // Re-renders while a modal is open (history pages arriving, arrow-key selection) must not
+            // replay the pop-in animation or steal the caret from the search box.
+            const before = new Set([...document.querySelectorAll('#modals [data-modal]')].map(m => m.dataset.modal));
+            const search = $('#historySearch');
+            const hadFocus = !!search && document.activeElement === search;
+            const caret = hadFocus ? [search.selectionStart, search.selectionEnd] : null;
+            const listScroll = $('#historyList')?.scrollTop || 0;
             $('#modals').innerHTML = html;
-            if (focusSearch) { const i = $('#historySearch'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
+            document.querySelectorAll('#modals [data-modal]').forEach(m => { if (before.has(m.dataset.modal)) $('.modal', m).style.animation = 'none'; });
+            const input = $('#historySearch');
+            if (input && (hadFocus || (S.historyOpen && !before.has('history')))) { input.focus(); const [a, b] = caret || [input.value.length, input.value.length]; try { input.setSelectionRange(a, b); } catch (e) { } }
+            if (listScroll && $('#historyList')) $('#historyList').scrollTop = listScroll;
         }
 
         const anyModalOpen = () => S.dialog.show || S.historyOpen || S.versionsOpen || S.helpOpen || S.ogOpen || S.twOpen || S.favOpen || S.pluginsOpen;
