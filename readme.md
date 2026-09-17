@@ -1,6 +1,10 @@
-# Periscope 🔭
+<p align="center">
+  <a href="https://periscope.run"><img src="Periscope.svg" width="96" height="96" alt="Periscope"></a>
+</p>
 
-**Peer into any domain.**
+<h1 align="center">Periscope</h1>
+
+<p align="center"><strong>Peer into any domain.</strong></p>
 
 Periscope is a sophisticated DNS and Network diagnostic tool. It combines a beautiful web interface [https://periscope.run](https://periscope.run) with a **Local Bridge** running on your machine. This allows the web UI to securely execute local system tools like `dig`, `whois`, and `curl` to gather deep intelligence on domains without rate limits or proxy restrictions.
 
